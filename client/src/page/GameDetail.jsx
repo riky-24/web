@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom"; // Tambah useNavigate
 import api from "../services/api";
 import {
   FaCheckCircle,
@@ -15,6 +15,7 @@ import {
 
 const GameDetail = () => {
   const { slug } = useParams();
+  const navigate = useNavigate(); // Hook navigasi
 
   // --- STATE MANAGEMENT ---
   const [game, setGame] = useState(null);
@@ -22,7 +23,7 @@ const GameDetail = () => {
   const [error, setError] = useState(null);
 
   // Form State
-  const [userId, setUserId] = useState("");
+  const [userId, setUserId] = useState(""); // Ini ID Player Game (bukan ID User Login)
   const [zoneId, setZoneId] = useState("");
   const [selectedProduct, setSelectedProduct] = useState(null);
 
@@ -31,7 +32,10 @@ const GameDetail = () => {
   const [nickname, setNickname] = useState(null);
   const [idError, setIdError] = useState("");
 
-  // 1. FETCH DATA
+  // Transaction State
+  const [processing, setProcessing] = useState(false); // State Loading Tombol Beli
+
+  // 1. FETCH DATA GAME
   useEffect(() => {
     const fetchGame = async () => {
       setLoading(true);
@@ -52,11 +56,10 @@ const GameDetail = () => {
     fetchGame();
   }, [slug]);
 
-  // 2. INPUT SANITIZATION (Security: OWASP)
+  // 2. INPUT SANITIZATION
   const handleUserIdChange = (e) => {
     const value = e.target.value;
     if (/^[a-zA-Z0-9]*$/.test(value)) {
-      // Hanya huruf & angka
       setUserId(value);
       if (nickname) setNickname(null);
       if (idError) setIdError("");
@@ -96,6 +99,35 @@ const GameDetail = () => {
     }
   };
 
+  // 4. HANDLE BUY LOGIC (INTEGRASI TRANSAKSI)
+  const handleBuy = async () => {
+    // Validasi frontend sederhana
+    if (!selectedProduct || !nickname) return;
+
+    setProcessing(true);
+    try {
+      // Kirim request order ke Backend
+      // Header Authorization (Token) otomatis dikirim oleh api.js jika user login
+      const res = await api.post("/orders", {
+        productId: selectedProduct.id,
+        gameUserId: userId, // ID Player Game
+        zoneId: zoneId, // Zone ID (Opsional tergantung game)
+      });
+
+      if (res.data.status === "success") {
+        const { paymentUrl } = res.data.data;
+
+        // Redirect user ke halaman pembayaran Midtrans
+        window.location.href = paymentUrl;
+      }
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.message || "Gagal membuat pesanan. Coba lagi.");
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   // --- RENDER STATES ---
   if (loading)
     return (
@@ -130,7 +162,6 @@ const GameDetail = () => {
     <div className="min-h-screen bg-[#F8F9FE] font-sans pb-20">
       {/* --- HERO HEADER ANIMATED --- */}
       <div className="relative w-full h-[500px] overflow-hidden bg-slate-900">
-        {/* 1. Dynamic Background Image (Parallax Effect) */}
         <div
           className="absolute inset-0 w-full h-full bg-cover bg-center opacity-60 scale-105 animate-[pulse_10s_ease-in-out_infinite]"
           style={{ backgroundImage: `url(${game.image})` }}
@@ -138,9 +169,7 @@ const GameDetail = () => {
           <div className="absolute inset-0 bg-gradient-to-t from-[#F8F9FE] via-slate-900/60 to-slate-900/90"></div>
         </div>
 
-        {/* 2. Content Overlay */}
         <div className="relative z-10 max-w-6xl mx-auto px-4 h-full flex flex-col md:flex-row items-center justify-center md:justify-start gap-8 pt-10">
-          {/* Logo Game Mengambang (Floating Animation) */}
           <div className="relative group perspective">
             <div className="absolute -inset-1 bg-gradient-to-r from-blue-500 to-purple-600 rounded-[2rem] blur opacity-40 group-hover:opacity-100 transition duration-1000 group-hover:duration-200"></div>
             <img
@@ -153,7 +182,6 @@ const GameDetail = () => {
             </div>
           </div>
 
-          {/* Text Content Fade In */}
           <div className="text-center md:text-left space-y-4 max-w-2xl animate-[fadeIn_1s_ease-out]">
             <h1 className="text-4xl md:text-6xl font-black text-white drop-shadow-lg tracking-tight leading-tight">
               {game.name}
@@ -171,7 +199,7 @@ const GameDetail = () => {
         </div>
       </div>
 
-      {/* --- MAIN FORM SECTION (Overlap Effect) --- */}
+      {/* --- MAIN FORM SECTION --- */}
       <div className="relative z-20 max-w-6xl mx-auto px-4 -mt-24 grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* LEFT COLUMN */}
         <div className="lg:col-span-2 space-y-6">
@@ -319,7 +347,6 @@ const GameDetail = () => {
                                         }
                                     `}
                       >
-                        {/* Efek Kilau saat Hover */}
                         <div className="absolute inset-0 bg-white/40 skew-x-12 -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>
 
                         {hasDiscount && (
@@ -384,7 +411,6 @@ const GameDetail = () => {
             {/* Summary Card */}
             <div className="bg-white rounded-3xl shadow-2xl shadow-blue-900/10 border border-white overflow-hidden ring-4 ring-slate-50">
               <div className="bg-slate-900 p-6 relative overflow-hidden">
-                {/* Abstract Background Decoration */}
                 <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600 rounded-full blur-[60px] opacity-40 -mr-10 -mt-10"></div>
                 <div className="absolute bottom-0 left-0 w-24 h-24 bg-purple-600 rounded-full blur-[40px] opacity-30 -ml-10 -mb-10"></div>
 
@@ -394,7 +420,6 @@ const GameDetail = () => {
               </div>
 
               <div className="p-6">
-                {/* Detail Items */}
                 <div className="space-y-4 text-sm mb-6">
                   <div className="flex justify-between items-center text-slate-500">
                     <span>Game</span>
@@ -431,7 +456,6 @@ const GameDetail = () => {
                   </div>
                 </div>
 
-                {/* Total Section */}
                 <div>
                   <div className="flex justify-between items-end mb-6">
                     <span className="text-slate-500 font-bold text-sm mb-1">
@@ -447,18 +471,22 @@ const GameDetail = () => {
                     </span>
                   </div>
 
+                  {/* UPDATED BUTTON */}
                   <button
-                    disabled={!selectedProduct || !nickname}
+                    onClick={handleBuy}
+                    disabled={!selectedProduct || !nickname || processing}
                     className={`
                                     w-full py-4 rounded-xl font-black text-lg shadow-xl transition-all duration-300 flex items-center justify-center gap-2 group
                                     ${
-                                      selectedProduct && nickname
+                                      selectedProduct && nickname && !processing
                                         ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:scale-[1.02] hover:shadow-blue-500/40 cursor-pointer"
                                         : "bg-slate-200 text-slate-400 cursor-not-allowed grayscale"
                                     }
                                 `}
                   >
-                    {nickname ? (
+                    {processing ? (
+                      "Memproses..."
+                    ) : nickname ? (
                       <>
                         Beli Sekarang{" "}
                         <FaBolt className="group-hover:animate-ping" />
