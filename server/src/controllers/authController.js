@@ -12,6 +12,13 @@ const authController = {
         return res.status(400).json({ message: "Semua kolom wajib diisi!" });
       }
 
+      if (password.length < 8) {
+        // Tambahan sesuai standar ASVS
+        return res
+          .status(400)
+          .json({ message: "Password minimal 8 karakter!" });
+      }
+
       // 1. Cek Email
       const existingUser = await prisma.user.findUnique({
         where: { email },

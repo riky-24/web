@@ -7,6 +7,7 @@ const { connectDB } = require("./config/database");
 const vipService = require("./services/vipResellerService");
 const gameRoutes = require("./routes/gameRoutes");
 const authRoutes = require("./routes/authRoutes");
+const rateLimit = require("express-rate-limit");
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -20,6 +21,12 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: "Terlalu banyak percobaan, silakan coba lagi nanti.",
+});
+app.use("/api/auth", limiter);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
