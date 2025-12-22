@@ -81,32 +81,92 @@ const authController = {
   },
 
   // --- FITUR LOGIN ---
+  // --- FITUR LOGIN (UPDATED) ---
   login: async (req, res) => {
     try {
       const { email, password } = req.body;
 
-      // Cari user
+      // 1. Cari user berdasarkan email
       const user = await prisma.user.findUnique({ where: { email } });
+
+      // Jika user tidak ditemukan, return error umum (Security Best Practice)
       if (!user)
         return res.status(400).json({ message: "Email atau Password salah!" });
 
-      // Cek Password
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch)
-        return res.status(400).json({ message: "Email atau Password salah!" });
+      // 2. CEK STATUS KUNCI (LOCKOUT CHECK)
+      if (user.lockUntil && user.lockUntil > new Date()) {
+        // Hitung sisa waktu kunci
+        const timeLeft = Math.ceil((user.lockUntil - new Date()) / 60000);
+        return res.status(403).json({
+          message: `Akun terkunci sementara karena terlalu banyak percobaan gagal. Silakan coba lagi dalam ${timeLeft} menit.`,
+        });
+      }
 
-      // Cek Status Aktif (Fitur baru schema Anda)
+      // 3. Cek Password
+      const isMatch = await bcrypt.compare(password, user.password);
+
+      if (!isMatch) {
+        // --- LOGIKA JIKA PASSWORD SALAH ---
+
+        const MAX_ATTEMPTS = 5; // Batas maksimal salah
+        const LOCK_TIME = 30 * 60 * 1000; // Kunci 30 menit
+
+        let newAttempts = user.failedLoginAttempts + 1;
+        let newLockUntil = null;
+
+        // Jika sudah mencapai batas, kunci akun
+        if (newAttempts >= MAX_ATTEMPTS) {
+          newLockUntil = new Date(Date.now() + LOCK_TIME);
+          // Reset attempts agar nanti setelah buka kunci mulai dari 0 lagi atau biarkan
+          // Biasanya direset nanti saat login sukses.
+        }
+
+        // Update ke database
+        await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            failedLoginAttempts: newAttempts,
+            lockUntil: newLockUntil,
+          },
+        });
+
+        // Beri peringatan sisa percobaan
+        const attemptsLeft = MAX_ATTEMPTS - newAttempts;
+        if (attemptsLeft > 0) {
+          return res.status(400).json({
+            message: `Password salah! Sisa percobaan: ${attemptsLeft} kali sebelum akun dikunci.`,
+          });
+        } else {
+          return res.status(403).json({
+            message: "Akun Anda telah dikunci sementara demi keamanan.",
+          });
+        }
+      }
+
+      // 4. LOGIKA JIKA LOGIN SUKSES
+
+      // Cek Status Aktif (Admin Ban)
       if (!user.isActive)
         return res.status(403).json({ message: "Akun Anda dinonaktifkan." });
 
-      // Buat Token
+      // --- RESET COUNTER (PENTING!) ---
+      // Karena login berhasil, kita hapus catatan dosa sebelumnya
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          failedLoginAttempts: 0,
+          lockUntil: null,
+        },
+      });
+
+      // Buat Token (Sama seperti sebelumnya)
       const token = jwt.sign(
         { id: user.id, role: user.role },
         process.env.JWT_SECRET || "rahasia",
         { expiresIn: "1d" }
       );
 
-      // Catat Audit Log Login
+      // Catat Audit Log
       await prisma.auditLog.create({
         data: {
           action: "AUTH_LOGIN",
@@ -116,6 +176,7 @@ const authController = {
         },
       });
 
+      // Kirim Response
       res.json({
         status: "success",
         data: {

@@ -1,4 +1,4 @@
-import { useState, useContext } from "react";
+import { useState, useContext, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import api from "../services/api";
 import { AuthContext } from "../context/AuthContext";
@@ -10,8 +10,16 @@ export default function Login() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const { login } = useContext(AuthContext);
+  // Ambil fungsi login dan data user dari Context
+  const { login, user } = useContext(AuthContext);
   const navigate = useNavigate();
+
+  // --- LOGIC TAMBAHAN: REDIRECT JIKA SUDAH LOGIN ---
+  useEffect(() => {
+    if (user) {
+      navigate("/"); // Lempar ke home jika user sudah ada (sudah login)
+    }
+  }, [user, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -19,17 +27,22 @@ export default function Login() {
     setError("");
 
     try {
-      // Sesuaikan endpoint dengan backend Anda
       const response = await api.post("/auth/login", { email, password });
 
-      // Asumsi response backend: { data: { user: {...}, token: "..." } }
-      const { user, token } = response.data.data;
+      // Ambil token & user dari response backend
+      // Struktur: { status: 'success', data: { token: '...', user: { ... } } }
+      const { user: loggedInUser, token } = response.data.data;
 
-      login(user, token);
-      navigate("/"); // Redirect ke Home setelah login
+      // Simpan ke Context (Otomatis update header & localStorage)
+      login(loggedInUser, token);
+
+      // Redirect ke Home setelah sukses
+      navigate("/");
     } catch (err) {
+      console.error("Login Error:", err);
       setError(
-        err.response?.data?.message || "Gagal login. Periksa kredensial Anda."
+        err.response?.data?.message ||
+          "Gagal login. Periksa email atau password Anda."
       );
     } finally {
       setLoading(false);
@@ -47,7 +60,7 @@ export default function Login() {
         </div>
 
         {error && (
-          <div className="bg-red-500/10 border border-red-500/50 text-red-400 p-3 rounded-lg mb-6 text-sm text-center">
+          <div className="bg-red-500/10 border border-red-500/50 text-red-400 p-3 rounded-lg mb-6 text-sm text-center font-medium">
             {error}
           </div>
         )}
@@ -61,7 +74,7 @@ export default function Login() {
               <FaEnvelope className="absolute left-3 top-3.5 text-slate-500" />
               <input
                 type="email"
-                className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl py-3 pl-10 pr-4 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+                className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl py-3 pl-10 pr-4 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors placeholder-slate-500"
                 placeholder="nama@email.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -78,7 +91,7 @@ export default function Login() {
               <FaLock className="absolute left-3 top-3.5 text-slate-500" />
               <input
                 type="password"
-                className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl py-3 pl-10 pr-4 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+                className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl py-3 pl-10 pr-4 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors placeholder-slate-500"
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -88,7 +101,7 @@ export default function Login() {
             <div className="text-right mt-2">
               <Link
                 to="/forgot-password"
-                class="text-xs text-blue-400 hover:text-blue-300"
+                class="text-xs text-blue-400 hover:text-blue-300 transition-colors"
               >
                 Lupa Password?
               </Link>
@@ -98,7 +111,9 @@ export default function Login() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold py-3.5 rounded-xl hover:shadow-lg hover:shadow-blue-500/30 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+            className={`w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold py-3.5 rounded-xl hover:shadow-lg hover:shadow-blue-500/30 transition-all flex items-center justify-center gap-2 ${
+              loading ? "opacity-70 cursor-not-allowed" : "hover:scale-[1.02]"
+            }`}
           >
             {loading ? (
               "Memproses..."
@@ -114,7 +129,7 @@ export default function Login() {
           Belum punya akun?{" "}
           <Link
             to="/register"
-            className="text-blue-400 font-bold hover:text-blue-300"
+            className="text-blue-400 font-bold hover:text-blue-300 transition-colors"
           >
             Daftar Disini
           </Link>

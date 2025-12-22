@@ -3,16 +3,21 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
+// PERBAIKAN DI SINI: Gunakan kurung kurawal { rateLimit }
+const { rateLimit } = require("express-rate-limit");
 const { connectDB } = require("./config/database");
 const vipService = require("./services/vipResellerService");
+
 const gameRoutes = require("./routes/gameRoutes");
 const authRoutes = require("./routes/authRoutes");
-const rateLimit = require("express-rate-limit");
+const orderRoutes = require("./routes/orderRoutes");
 
 const app = express();
 const port = process.env.PORT || 5000;
 
-// Middleware
+// ==========================================
+// 1. Security & Middlewares
+// ==========================================
 app.use(helmet());
 app.use(
   cors({
@@ -21,43 +26,49 @@ app.use(
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  message: "Terlalu banyak percobaan, silakan coba lagi nanti.",
-});
-app.use("/api/auth", limiter);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
 
-// Routes
+// RATE LIMITER (Anti Spam/Brute Force)
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 menit
+  max: 10, // Maksimal 100 request per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    status: "error",
+    message: "Terlalu banyak request, coba lagi nanti.",
+  },
+});
+// Pasang limiter HANYA di jalur auth agar user tidak kena limit saat cek game
+app.use("/api/auth", limiter);
+
+// ==========================================
+// 2. Routes
+// ==========================================
 app.use("/api/games", gameRoutes);
 app.use("/api/auth", authRoutes);
-app.get("/test-vip", async (req, res) => {
-  try {
-    const profile = await vipService.getProfile();
-    res.json({
-      status: "success",
-      message: "Koneksi VIP Berhasil!",
-      data: profile,
-    });
-  } catch (error) {
-    res.status(500).json({ status: "error", message: error.message });
-  }
-});
+app.use("/api/orders", orderRoutes);
 
-app.get("/", (req, res) =>
-  res.json({ status: "success", message: "Server Berjalan!" })
-);
+// Health Check
+app.get("/", (req, res) => {
+  res.status(200).json({
+    status: "success",
+    message: "Server Game Topup berjalan dengan aman!",
+  });
+});
 
 // Error Handler
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(500).json({ status: "error", message: "Internal Server Error" });
+  res.status(500).json({
+    status: "error",
+    message: "Terjadi kesalahan internal pada server",
+  });
 });
 
-// START SERVER (CUKUP SATU KALI DI SINI)
+// START SERVER
 connectDB().then(() => {
   app.listen(port, () => {
     console.log(`\n[SERVER] Berjalan di http://localhost:${port}`);
