@@ -1,6 +1,9 @@
-import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
-import api from "../services/api"; // Pastikan path ini benar
+import { useState, useEffect, useContext } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import api from "../services/api";
+// IMPORT CONTEXT AGAR BISA CEK LOGIN
+import { AuthContext } from "../context/AuthContext";
+
 import {
   FaSearch,
   FaGamepad,
@@ -11,6 +14,8 @@ import {
   FaClock,
   FaCheckCircle,
   FaUsers,
+  FaUserCircle,
+  FaSignOutAlt,
 } from "react-icons/fa";
 
 export default function Home() {
@@ -22,6 +27,10 @@ export default function Home() {
   // State Search & Banner
   const [search, setSearch] = useState("");
   const [currentBanner, setCurrentBanner] = useState(0);
+
+  // --- AMBIL DATA USER DARI CONTEXT ---
+  const { user, logout } = useContext(AuthContext);
+  const navigate = useNavigate();
 
   // Data Dummy untuk UI "Ramai"
   const banners = [
@@ -66,17 +75,15 @@ export default function Home() {
     { id: "RPG", label: "RPG", icon: <FaFire /> },
   ];
 
-  // 1. Fetch Data (FIXED: Menggunakan api.get bukan gameAPI)
+  // 1. Fetch Data
   useEffect(() => {
     const fetchGames = async () => {
       try {
         const response = await api.get("/games");
-        // Validasi struktur response backend kita
         if (response.data && response.data.data) {
           setGames(response.data.data);
           setFilteredGames(response.data.data);
         } else {
-          // Fallback jika format beda
           setGames(response.data);
           setFilteredGames(response.data);
         }
@@ -119,20 +126,74 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-[#0F172A] text-slate-100 font-sans overflow-x-hidden flex flex-col">
-      {/* Navbar Placeholder (Sementara Hardcode biar gak error) */}
-      <nav className="bg-slate-900 border-b border-white/10 p-4 sticky top-0 z-40">
+      {/* --- NAVBAR DINAMIS --- */}
+      <nav className="bg-slate-900 border-b border-white/10 p-4 sticky top-0 z-50 backdrop-blur-md bg-opacity-90">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
-          <h1 className="text-xl font-black text-blue-500">GAME TOPUP</h1>
-          <div className="space-x-4">
-            <Link to="/login" className="text-sm font-bold hover:text-blue-400">
-              Masuk
-            </Link>
+          {/* Logo */}
+          <Link
+            to="/"
+            className="text-xl font-black text-blue-500 flex items-center gap-2"
+          >
+            <FaGamepad className="text-2xl" /> GAME TOPUP
+          </Link>
+
+          {/* Menu Kanan: Cek Login User */}
+          <div className="flex items-center gap-4">
+            {/* Link Status Order (Selalu Muncul) */}
             <Link
-              to="/register"
-              className="bg-blue-600 px-4 py-2 rounded-full text-sm font-bold hover:bg-blue-700"
+              to="/order-status"
+              className="hidden md:block text-sm font-bold text-slate-400 hover:text-white transition-colors"
             >
-              Daftar
+              Cek Pesanan
             </Link>
+
+            <div className="h-6 w-px bg-white/10 hidden md:block"></div>
+
+            {user ? (
+              // JIKA SUDAH LOGIN (TAMPILKAN NAMA & LOGOUT)
+              <div className="flex items-center gap-4">
+                <Link
+                  to="/profile"
+                  className="flex items-center gap-2 hover:bg-slate-800 px-3 py-1.5 rounded-full transition-all group"
+                >
+                  <div className="bg-blue-600 text-white w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs">
+                    {user.username
+                      ? user.username.substring(0, 2).toUpperCase()
+                      : "US"}
+                  </div>
+                  <div className="text-right hidden sm:block">
+                    <p className="text-xs font-bold text-white group-hover:text-blue-400">
+                      {user.username}
+                    </p>
+                    <p className="text-[10px] text-slate-400">Member</p>
+                  </div>
+                </Link>
+
+                <button
+                  onClick={logout}
+                  className="bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white p-2 rounded-full transition-all"
+                  title="Keluar"
+                >
+                  <FaSignOutAlt className="text-sm" />
+                </button>
+              </div>
+            ) : (
+              // JIKA BELUM LOGIN (TAMPILKAN MASUK & DAFTAR)
+              <div className="space-x-3">
+                <Link
+                  to="/login"
+                  className="text-sm font-bold text-slate-300 hover:text-white transition-colors"
+                >
+                  Masuk
+                </Link>
+                <Link
+                  to="/register"
+                  className="bg-blue-600 px-5 py-2 rounded-full text-sm font-bold hover:bg-blue-700 shadow-lg shadow-blue-600/20 transition-all"
+                >
+                  Daftar
+                </Link>
+              </div>
+            )}
           </div>
         </div>
       </nav>
