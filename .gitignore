@@ -2,4 +2,5 @@ node_modules
 .env
 schema.prisma
 DS_Store
-server/prisma
+prisma
+migrations
