@@ -18,7 +18,34 @@ const port = process.env.PORT || 5000;
 // ==========================================
 // 1. Security & Middlewares
 // ==========================================
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        // Izinkan gambar dari domain sendiri dan URL eksternal terpercaya
+        imgSrc: [
+          "'self'",
+          "data:",
+          "https://cdn.wallpapersafari.com",
+          "https://wallpapers.com",
+          "https://images.unsplash.com",
+        ],
+        // Izinkan script hanya dari domain sendiri dan Midtrans
+        scriptSrc: [
+          "'self'",
+          "https://app.sandbox.midtrans.com",
+          "https://app.midtrans.com",
+        ],
+        // Izinkan koneksi API (fetch/axios) ke server sendiri & midtrans
+        connectSrc: ["'self'", "https://app.sandbox.midtrans.com"],
+        // Izinkan iframe (untuk Snap Midtrans)
+        frameSrc: ["'self'", "https://app.sandbox.midtrans.com"],
+      },
+    },
+    crossOriginResourcePolicy: { policy: "cross-origin" }, // Agar gambar bisa di-load
+  })
+);
 app.use(
   cors({
     origin: "http://localhost:5173",
@@ -41,15 +68,21 @@ const limiter = rateLimit({
     message: "Terlalu banyak request, coba lagi nanti.",
   },
 });
+
+const orderLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 2, // Order: Maksimal 10 order per menit per IP (Cukup untuk user normal)
+  message: "Anda membuat order terlalu cepat. Santai dulu.",
+});
 // Pasang limiter HANYA di jalur auth agar user tidak kena limit saat cek game
 app.use("/api/auth", limiter);
 
 // ==========================================
 // 2. Routes
 // ==========================================
-app.use("/api/games", gameRoutes);
+app.use("/api/games", orderLimiter, gameRoutes);
 app.use("/api/auth", authRoutes);
-app.use("/api/orders", orderRoutes);
+app.use("/api/orders", orderLimiter, orderRoutes);
 
 // Health Check
 app.get("/", (req, res) => {

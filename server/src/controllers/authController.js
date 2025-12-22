@@ -8,25 +8,37 @@ const authController = {
     try {
       const { name, email, password } = req.body;
 
+      // 1. Validasi Input Kosong
       if (!name || !email || !password) {
         return res.status(400).json({ message: "Semua kolom wajib diisi!" });
       }
 
+      // --- TAMBAHAN BARU: VALIDASI ANTI-SCRIPT (XSS) ---
+      // Tolak jika nama mengandung karakter berbahaya seperti <, >, atau ;
+      // Ini mencegah hacker menyuntikkan tag HTML/Script ke dalam nama.
+      const dangerousChars = /[<>;]/;
+      if (dangerousChars.test(name)) {
+        return res
+          .status(400)
+          .json({ message: "Nama tidak boleh mengandung simbol aneh!" });
+      }
+      // --------------------------------------------------
+
+      // 2. Validasi Password Minimal (Standar Keamanan)
       if (password.length < 8) {
-        // Tambahan sesuai standar ASVS
         return res
           .status(400)
           .json({ message: "Password minimal 8 karakter!" });
       }
 
-      // 1. Cek Email
+      // 3. Cek Email Terdaftar
       const existingUser = await prisma.user.findUnique({
         where: { email },
       });
       if (existingUser)
         return res.status(400).json({ message: "Email sudah digunakan!" });
 
-      // 2. Auto-Generate Username Unik
+      // 4. Auto-Generate Username Unik
       // Contoh: riky@gmail.com -> riky8821
       let username =
         email.split("@")[0] + Math.floor(1000 + Math.random() * 9000);
@@ -39,23 +51,23 @@ const authController = {
         username = username + Math.floor(Math.random() * 100);
       }
 
-      // 3. Hash Password
+      // 5. Hash Password
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(password, salt);
 
-      // 4. Create User (Sesuai Schema Baru)
+      // 6. Create User
       const newUser = await prisma.user.create({
         data: {
-          name,
+          name, // Nama yang disimpan sudah pasti bersih dari script
           email,
-          username, // Field baru wajib diisi
+          username,
           password: hashedPassword,
           role: "USER",
           balance: 0,
         },
       });
 
-      // 5. Catat ke Audit Log (Fitur baru Schema Anda)
+      // 7. Catat ke Audit Log
       await prisma.auditLog.create({
         data: {
           action: "AUTH_REGISTER",
