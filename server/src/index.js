@@ -3,9 +3,7 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
-// Tambahkan ini di bawah require lainnya
 const { connectDB } = require("./config/database");
-// IMPORT SEMENTARA (Nanti dipindah ke Controller)
 const vipService = require("./services/vipResellerService");
 const gameRoutes = require("./routes/gameRoutes");
 
@@ -13,35 +11,26 @@ const app = express();
 const port = process.env.PORT || 5000;
 
 // ==========================================
-// 1. Security & Middlewares (Standar OWASP)
+// 1. Security & Middlewares
 // ==========================================
-
-// Helmet: Mengamankan HTTP headers (XSS Protection, dsb)
 app.use(helmet());
-
-// CORS: Mengizinkan akses hanya dari Frontend Client kita
 app.use(
   cors({
-    origin: "http://localhost:5173", // Port default Vite
+    origin: "http://localhost:5173",
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
-
-// Parsing Body Request
-app.use(express.json()); // Parsing JSON
-app.use(express.urlencoded({ extended: true })); // Parsing URL Encoded
-
-// Logging (Membantu monitoring aktivitas server)
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
 
 // ==========================================
 // 2. Routes
 // ==========================================
+app.use("/api/games", gameRoutes);
 
-app.use("/api/games", gameRoutes); // <--- Tambahkan ini
-
-// TEST ROUTE: Cek Koneksi ke VIP Reseller
+// TEST ROUTE: VIP Reseller
 app.get("/test-vip", async (req, res) => {
   try {
     const profile = await vipService.getProfile();
@@ -59,7 +48,7 @@ app.get("/test-vip", async (req, res) => {
   }
 });
 
-// Test Route (Health Check)
+// Health Check
 app.get("/", (req, res) => {
   res.status(200).json({
     status: "success",
@@ -68,10 +57,8 @@ app.get("/", (req, res) => {
   });
 });
 
-// Nanti kita import routes lain di sini (auth, product, order, dll)
-
 // ==========================================
-// 3. Error Handling (Global)
+// 3. Error Handling & Start Server
 // ==========================================
 app.use((err, req, res, next) => {
   console.error(err.stack);
@@ -81,18 +68,11 @@ app.use((err, req, res, next) => {
   });
 });
 
-//koneksi database
+// HANYA BOLEH ADA SATU app.listen
+// Jalankan koneksi database DULU, baru jalankan server
 connectDB().then(() => {
   app.listen(port, () => {
     console.log(`\n[SERVER] Berjalan di http://localhost:${port}`);
     console.log(`[MODE]   ${process.env.NODE_ENV || "development"}`);
   });
-});
-
-// ==========================================
-// 4. Start Server
-// ==========================================
-app.listen(port, () => {
-  console.log(`\n[SERVER] Berjalan di http://localhost:${port}`);
-  console.log(`[MODE]   ${process.env.NODE_ENV || "development"}`);
 });

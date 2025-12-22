@@ -6,11 +6,11 @@ import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 // Pastikan nama file di folder 'page' sudah Huruf Besar semua (Home.jsx, Login.jsx, dst)
 import Home from "./page/Home";
 import GameDetail from "./page/GameDetail";
-//import Login from "./page/Login";
-//import Register from "./page/Register";
-//import Profile from "./page/Profile";
-//import OrderStatus from "./page/OrderStatus";
-//import ForgotPassword from "./page/ForgotPassword";
+import Login from "./page/Login";
+import Register from "./page/Register";
+import Profile from "./page/Profile";
+import OrderStatus from "./page/OrderStatus";
+import ForgotPassword from "./page/ForgotPassword";
 
 function App() {
   return (
