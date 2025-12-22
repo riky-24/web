@@ -1,29 +1,59 @@
 import React from "react";
 import { Link } from "react-router-dom";
+import { FaGamepad, FaStar } from "react-icons/fa";
 
 const GameCard = ({ game }) => {
   return (
-    <Link to={`/game/${game.slug}`} className="group">
-      <div className="bg-white rounded-xl shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden border border-gray-100 hover:border-blue-400">
-        {/* Gambar Game */}
-        <div className="aspect-[4/3] overflow-hidden relative">
+    <Link
+      to={`/game/${game.slug}`}
+      className="group relative block w-full h-full"
+    >
+      {/* Background Glow Effect saat Hover */}
+      <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl blur opacity-0 group-hover:opacity-75 transition duration-500 group-hover:duration-200"></div>
+
+      <div className="relative flex flex-col h-full bg-slate-800 rounded-xl overflow-hidden border border-slate-700 shadow-xl transition-transform duration-300 group-hover:-translate-y-2">
+        {/* Image Container */}
+        <div className="relative aspect-[4/5] overflow-hidden">
           <img
             src={game.image}
             alt={game.name}
-            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+            loading="lazy"
           />
-          {/* Badge Kategori */}
-          <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-white text-xs px-2 py-1 rounded">
-            {game.category}
+
+          {/* Overlay Gradient */}
+          <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-transparent to-transparent opacity-90"></div>
+
+          {/* Category Badge */}
+          <div className="absolute top-3 right-3 bg-white/10 backdrop-blur-md border border-white/20 text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-lg">
+            {game.category || "GAME"}
+          </div>
+
+          {/* Publisher (Bottom) */}
+          <div className="absolute bottom-3 left-3 right-3">
+            <div className="flex items-center gap-1 text-yellow-400 text-xs font-bold mb-1 opacity-0 group-hover:opacity-100 transition-opacity duration-300 transform translate-y-2 group-hover:translate-y-0">
+              <FaStar /> 4.9/5
+            </div>
+            <p className="text-slate-400 text-xs font-medium uppercase tracking-wider">
+              {game.publisher}
+            </p>
           </div>
         </div>
 
-        {/* Info Game */}
-        <div className="p-4">
-          <h3 className="font-bold text-gray-800 truncate group-hover:text-blue-600">
+        {/* Info Content */}
+        <div className="p-4 bg-slate-800 flex-grow flex flex-col justify-between border-t border-slate-700">
+          <h3 className="text-lg font-bold text-white leading-tight group-hover:text-blue-400 transition-colors line-clamp-2">
             {game.name}
           </h3>
-          <p className="text-sm text-gray-500">{game.publisher}</p>
+
+          <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+            <div className="flex items-center gap-1">
+              <FaGamepad /> Instant
+            </div>
+            <span className="group-hover:text-white transition-colors">
+              Top Up &rarr;
+            </span>
+          </div>
         </div>
       </div>
     </Link>

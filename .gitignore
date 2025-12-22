@@ -1,6 +1,52 @@
-node_modules
+# --- Dependencies (Wajib di-ignore) ---
+node_modules/
+package-lock.json
+# ^ package-lock.json opsional di-ignore, tapi seringnya dicommit untuk lock version. 
+# Kalau mau lock version tim, hapus baris package-lock.json di atas.
+
+# --- Environment Variables (SANGAT PENTING / SECURITY) ---
+# Jangan pernah upload .env karena berisi password database & API Key!
 .env
-schema.prisma
-DS_Store
-prisma
-migrations
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+!.env.example
+
+# --- Build Outputs (Frontend & Backend) ---
+dist/
+build/
+out/
+.next/
+coverage/
+
+# --- Logs & Debugging ---
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# --- System Files (Sampah OS) ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# --- Testing ---
+/coverage
+
+# --- Prisma (Database) ---
+# Ignore file database SQLite jika ada (meski kita pakai Postgres, jaga-jaga)
+*.sqlite
+*.sqlite-journal
+
+# --- Optional: Ignore media uploads folder (jika ada upload gambar lokal) ---
+server/uploads/
+server/public/images/
+server/prisma/

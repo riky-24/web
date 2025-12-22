@@ -1,71 +1,54 @@
-import { useState, useEffect } from "react";
+import React from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
-import api from "./services/api";
-import GameCard from "./components/GameCard";
+//import { AuthProvider } from "./context/AuthContext"; // Integrasi Context Login
+
+// --- IMPORT HALAMAN ---
+// Pastikan nama file di folder 'page' sudah Huruf Besar semua (Home.jsx, Login.jsx, dst)
+import Home from "./page/Home";
 import GameDetail from "./page/GameDetail";
+//import Login from "./page/Login";
+//import Register from "./page/Register";
+//import Profile from "./page/Profile";
+//import OrderStatus from "./page/OrderStatus";
+//import ForgotPassword from "./page/ForgotPassword";
 
-// Halaman Home
-function Home() {
-  const [games, setGames] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  // Ambil data saat halaman dibuka
-  useEffect(() => {
-    const fetchGames = async () => {
-      try {
-        const response = await api.get("/games");
-        setGames(response.data.data); // Sesuai format JSON backend { data: [...] }
-      } catch (error) {
-        console.error("Gagal mengambil game:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchGames();
-  }, []);
-
-  return (
-    <div className="min-h-screen bg-gray-50 p-8">
-      <div className="max-w-6xl mx-auto">
-        <h1 className="text-3xl font-bold text-gray-800 mb-2">
-          Mau Top Up Apa Hari Ini?
-        </h1>
-        <p className="text-gray-500 mb-8">
-          Pilih game favoritmu dan top up instan.
-        </p>
-
-        {loading ? (
-          // Skeleton Loading (Efek loading sederhana)
-          <div className="text-center py-20 text-gray-400">
-            Sedang memuat game...
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
-            {games.map((game) => (
-              <GameCard key={game.id} game={game} />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// Routing Utama
 function App() {
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<Home />} />
-        {/* Nanti kita tambah Route Detail di sini */}
-        <Route path="/game/:slug" element={<GameDetail />} />
-        <Route
-          path="/game/:slug"
-          element={<div className="p-10">Halaman Detail (Belum dibuat)</div>}
-        />
-      </Routes>
-    </Router>
+    // 1. Bungkus dengan AuthProvider agar status login terbaca di semua halaman
+    <AuthProvider>
+      <Router>
+        <div className="font-sans text-slate-800 antialiased">
+          <Routes>
+            {/* --- PUBLIC ROUTES (Bisa diakses siapa saja) --- */}
+            <Route path="/" element={<Home />} />
+            <Route path="/game/:slug" element={<GameDetail />} />
+            <Route path="/order-status" element={<OrderStatus />} />
+
+            {/* --- AUTH ROUTES (Login/Register) --- */}
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+
+            {/* --- PROTECTED ROUTES (Halaman User Login) --- */}
+            {/* Nanti kita bisa tambahkan logika redirect jika belum login */}
+            <Route path="/profile" element={<Profile />} />
+
+            {/* --- 404 NOT FOUND --- */}
+            <Route
+              path="*"
+              element={
+                <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white">
+                  <div className="text-center">
+                    <h1 className="text-4xl font-bold mb-4">404</h1>
+                    <p>Halaman tidak ditemukan.</p>
+                  </div>
+                </div>
+              }
+            />
+          </Routes>
+        </div>
+      </Router>
+    </AuthProvider>
   );
 }
 
