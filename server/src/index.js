@@ -6,6 +6,7 @@ const morgan = require("morgan");
 const { connectDB } = require("./config/database");
 const vipService = require("./services/vipResellerService");
 const gameRoutes = require("./routes/gameRoutes");
+const authRoutes = require("./routes/authRoutes");
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -25,7 +26,7 @@ app.use(morgan("dev"));
 
 // Routes
 app.use("/api/games", gameRoutes);
-
+app.use("/api/auth", authRoutes);
 app.get("/test-vip", async (req, res) => {
   try {
     const profile = await vipService.getProfile();
