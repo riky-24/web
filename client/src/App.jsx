@@ -1,9 +1,8 @@
 import React from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
-//import { AuthProvider } from "./context/AuthContext"; // Integrasi Context Login
+import { AuthProvider } from "./context/AuthContext"; // Integrasi Context Login
 
 // --- IMPORT HALAMAN ---
-// Pastikan nama file di folder 'page' sudah Huruf Besar semua (Home.jsx, Login.jsx, dst)
 import Home from "./page/Home";
 import GameDetail from "./page/GameDetail";
 import Login from "./page/Login";
