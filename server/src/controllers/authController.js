@@ -7,7 +7,7 @@ const dns = require("dns");
 
 const authController = {
   // ==========================================
-  // 1. REGISTER (Updated: Strict Validation)
+  // 1. REGISTER (Secure: Anti-Enumeration & Validation)
   // ==========================================
   register: async (req, res) => {
     // Variable di luar try agar bisa diakses di catch untuk rollback
@@ -16,26 +16,36 @@ const authController = {
     try {
       const { name, email, password } = req.body;
 
-      // --- 1. Validasi Input Dasar ---
+      // --- 1. Validasi Input Strict ---
       if (!name || !email || !password) {
         return res.status(400).json({ message: "Semua kolom wajib diisi!" });
       }
-      if (/[<>;]/.test(name)) {
+
+      // Regex: Hanya huruf, angka, spasi, titik, koma, petik satu, strip.
+      // Mencegah karakter kontrol berbahaya seperti < > ; { }
+      const safeNameRegex = /^[a-zA-Z0-9\s.,'-]+$/;
+      if (!safeNameRegex.test(name)) {
         return res
           .status(400)
-          .json({ message: "Nama mengandung karakter terlarang!" });
+          .json({ message: "Nama mengandung karakter yang tidak diizinkan!" });
       }
+
       if (password.length < 8) {
         return res
           .status(400)
           .json({ message: "Password minimal 8 karakter!" });
       }
 
-      // --- 2. Validasi Domain Email (DNS Lookup) ---
-      // Ini akan menolak email seperti "asal@ngawur.com" yang domainnya tidak ada
-      const domain = email.split("@")[1];
+      // Normalisasi email agar case-insensitive
+      const normalizedEmail = email.toLowerCase();
+
+      // --- 2. Validasi Domain Email (DNS Lookup dengan Timeout) ---
+      // Mencegah server hang jika DNS lambat
+      const domain = normalizedEmail.split("@")[1];
       const isValidDomain = await new Promise((resolve) => {
+        const timeout = setTimeout(() => resolve(false), 5000); // 5 detik timeout
         dns.resolveMx(domain, (err, addresses) => {
+          clearTimeout(timeout);
           if (err || !addresses || addresses.length === 0) resolve(false);
           else resolve(true);
         });
@@ -47,24 +57,37 @@ const authController = {
           .json({ message: "Domain email tidak valid atau tidak ditemukan!" });
       }
 
-      // --- 3. Cek Email Terdaftar di Database ---
-      const existingUser = await prisma.user.findUnique({ where: { email } });
-      if (existingUser) {
-        return res.status(400).json({ message: "Masalah jaringan coba lagi." });
-      }
-
-      // --- 4. Persiapan Data ---
-      let username =
-        email.split("@")[0] + Math.floor(1000 + Math.random() * 9000);
+      // --- 3. Pre-Computation (Mitigasi Timing Attack) ---
+      // Kita hash password DULU sebelum cek database.
+      // Ini memastikan waktu proses selalu lama (karena bcrypt),
+      // baik user baru maupun user lama.
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(password, salt);
+
+      // --- 4. Cek Email Terdaftar (Silent Check) ---
+      const existingUser = await prisma.user.findUnique({
+        where: { email: normalizedEmail },
+      });
+
+      if (existingUser) {
+        // SECURITY: Return SUKSES palsu.
+        // Jangan beritahu "Email sudah terdaftar" untuk mencegah Enumeration.
+        return res.status(200).json({
+          status: "success",
+          message: "Registrasi berhasil! Cek email Anda untuk verifikasi akun.",
+        });
+      }
+
+      // --- 5. Persiapan Data & Token ---
+      let username =
+        normalizedEmail.split("@")[0] + Math.floor(1000 + Math.random() * 9000);
       const verificationToken = crypto.randomBytes(32).toString("hex");
 
-      // --- 5. SIMPAN KE DB (Transactional Check) ---
+      // --- 6. SIMPAN KE DB ---
       newUser = await prisma.user.create({
         data: {
           name,
-          email,
+          email: normalizedEmail,
           username,
           password: hashedPassword,
           role: "USER",
@@ -74,27 +97,27 @@ const authController = {
         },
       });
 
-      // --- 6. KIRIM EMAIL ---
+      // --- 7. KIRIM EMAIL ---
       const emailSent = await emailService.sendVerificationEmail(
         newUser.email,
         verificationToken
       );
 
-      // Jika gagal kirim email (misal SMTP down), hapus user langsung
+      // Jika gagal kirim email, hapus user agar tidak jadi sampah data
       if (!emailSent) {
         await prisma.user.delete({ where: { id: newUser.id } });
         return res.status(500).json({
-          message: "Gagal mengirim email verifikasi. Data dibatalkan.",
+          message: "Gagal mengirim email verifikasi. Silakan coba lagi.",
         });
       }
 
-      // --- 7. Audit Log ---
+      // --- 8. Audit Log ---
       await prisma.auditLog.create({
         data: {
           action: "AUTH_REGISTER",
           userId: newUser.id,
-          details: "User register",
-          ipAddress: req.ip,
+          details: "User register success",
+          ipAddress: req.ip || req.socket.remoteAddress,
         },
       });
 
@@ -105,9 +128,7 @@ const authController = {
     } catch (error) {
       console.error("Register Error:", error);
 
-      // --- ROLLBACK MECHANISM ---
-      // Jika terjadi error apapun (misal error audit log),
-      // tapi user terlanjur terbuat, kita hapus agar tidak jadi zombie.
+      // Rollback jika terjadi crash setelah user terbuat
       if (newUser) {
         try {
           await prisma.user.delete({ where: { id: newUser.id } });
@@ -149,7 +170,7 @@ const authController = {
           action: "AUTH_VERIFY",
           userId: user.id,
           details: "Email verified",
-          ipAddress: req.ip,
+          ipAddress: req.ip || req.socket.remoteAddress,
         },
       });
 
@@ -164,20 +185,32 @@ const authController = {
   },
 
   // ==========================================
-  // 3. LOGIN (Full Security: Lockout & Verify)
+  // 3. LOGIN (Secure: Lockout & Timing Safe)
   // ==========================================
   login: async (req, res) => {
     try {
       const { email, password } = req.body;
-      const user = await prisma.user.findUnique({ where: { email } });
+      const normalizedEmail = email ? email.toLowerCase() : "";
 
-      // Dummy Hash (Anti-Timing Attack)
+      const user = await prisma.user.findUnique({
+        where: { email: normalizedEmail },
+      });
+
+      // Pesan Error Generik (PENTING untuk keamanan)
+      const invalidMsg = "Email atau Password salah!";
+
+      // --- Mitigasi Timing Attack ---
+      // Jika user tidak ditemukan, kita tetap jalankan hashing palsu
+      // agar waktunya mirip dengan jika user ditemukan.
       if (!user) {
-        await bcrypt.compare(password, "$2b$10$abcdefghijklmnopqrstuv");
-        return res.status(400).json({ message: "Email atau Password salah!" });
+        await bcrypt.compare(
+          password || "dummy",
+          "$2b$10$abcdefghijklmnopqrstuv"
+        );
+        return res.status(400).json({ message: invalidMsg });
       }
 
-      // Cek Lockout
+      // Cek Lockout (Brute Force Protection)
       if (user.lockUntil && user.lockUntil > new Date()) {
         const timeLeft = Math.ceil((user.lockUntil - new Date()) / 60000);
         return res.status(403).json({
@@ -190,7 +223,7 @@ const authController = {
       if (!isMatch) {
         // Logic Lockout Counter
         const MAX_ATTEMPTS = 5;
-        const LOCK_TIME = 30 * 60 * 1000;
+        const LOCK_TIME = 30 * 60 * 1000; // 30 Menit
         let newAttempts = (user.failedLoginAttempts || 0) + 1;
         let newLockUntil = user.lockUntil;
 
@@ -203,7 +236,7 @@ const authController = {
           data: { failedLoginAttempts: newAttempts, lockUntil: newLockUntil },
         });
 
-        return res.status(400).json({ message: "Email atau Password salah!" });
+        return res.status(400).json({ message: invalidMsg });
       }
 
       // Cek Verifikasi Email
@@ -214,9 +247,10 @@ const authController = {
         });
       }
 
-      // Cek Banned
-      if (!user.isActive)
+      // Cek Status Aktif/Banned
+      if (user.isActive === false) {
         return res.status(403).json({ message: "Akun dinonaktifkan." });
+      }
 
       // Reset Lockout & Login Sukses
       await prisma.user.update({
@@ -235,7 +269,7 @@ const authController = {
           action: "AUTH_LOGIN",
           userId: user.id,
           details: "Login success",
-          ipAddress: req.ip,
+          ipAddress: req.ip || req.socket.remoteAddress,
         },
       });
 
@@ -259,28 +293,27 @@ const authController = {
   },
 
   // ==========================================
-  // 4. FORGOT PASSWORD (Kirim Link Reset)
+  // 4. FORGOT PASSWORD (Secure: Silent)
   // ==========================================
   forgotPassword: async (req, res) => {
     try {
       const { email } = req.body;
+      const normalizedEmail = email ? email.toLowerCase() : "";
 
-      // 1. Cari User
-      const user = await prisma.user.findUnique({ where: { email } });
+      const user = await prisma.user.findUnique({
+        where: { email: normalizedEmail },
+      });
 
+      // SECURITY: Selalu return sukses (200) meski user tidak ada.
       if (!user) {
-        // SECURITY: Jangan kasih tau kalau email tidak ada (Anti-Enumeration)
-        // Pura-pura sukses agar hacker tidak bisa scan database email.
         return res.status(200).json({
           message: "Link reset password telah dikirim ke email Anda.",
         });
       }
 
-      // 2. Generate Token Reset
       const resetToken = crypto.randomBytes(32).toString("hex");
-      const resetTokenExpires = new Date(Date.now() + 3600000); // 1 Jam dari sekarang
+      const resetTokenExpires = new Date(Date.now() + 3600000); // 1 Jam
 
-      // 3. Simpan Token ke Database
       await prisma.user.update({
         where: { id: user.id },
         data: {
@@ -289,7 +322,6 @@ const authController = {
         },
       });
 
-      // 4. Kirim Email
       await emailService.sendResetPasswordEmail(user.email, resetToken);
 
       res.json({ message: "Link reset password telah dikirim ke email Anda." });
@@ -300,13 +332,12 @@ const authController = {
   },
 
   // ==========================================
-  // 5. RESET PASSWORD (Eksekusi Ganti Password)
+  // 5. RESET PASSWORD
   // ==========================================
   resetPassword: async (req, res) => {
     try {
       const { token, newPassword, confirmPassword } = req.body;
 
-      // 1. Validasi Input
       if (!token || !newPassword || !confirmPassword) {
         return res.status(400).json({ message: "Semua data wajib diisi!" });
       }
@@ -323,12 +354,11 @@ const authController = {
           .json({ message: "Password minimal 8 karakter!" });
       }
 
-      // 2. Cari User berdasarkan Token & Cek Kedaluwarsa
       const user = await prisma.user.findFirst({
         where: {
           resetPasswordToken: token,
           resetPasswordExpires: {
-            gt: new Date(), // Harus lebih besar dari waktu sekarang (belum expired)
+            gt: new Date(), // Belum expired
           },
         },
       });
@@ -339,27 +369,24 @@ const authController = {
           .json({ message: "Token tidak valid atau sudah kedaluwarsa." });
       }
 
-      // 3. Hash Password Baru
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(newPassword, salt);
 
-      // 4. Update User & Hapus Token Reset
       await prisma.user.update({
         where: { id: user.id },
         data: {
           password: hashedPassword,
-          resetPasswordToken: null, // Hapus token agar tidak bisa dipakai lagi
+          resetPasswordToken: null,
           resetPasswordExpires: null,
         },
       });
 
-      // 5. Audit Log
       await prisma.auditLog.create({
         data: {
           action: "AUTH_RESET_PASSWORD",
           userId: user.id,
           details: "Password reset success",
-          ipAddress: req.ip,
+          ipAddress: req.ip || req.socket.remoteAddress,
         },
       });
 
