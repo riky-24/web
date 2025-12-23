@@ -3,17 +3,20 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const emailService = require("../services/emailService");
+const dns = require("dns");
 
 const authController = {
   // ==========================================
-  // 1. REGISTER (Updated: Anti-Zombie Account)
+  // 1. REGISTER (Updated: Strict Validation)
   // ==========================================
-  // --- REGISTER (UPDATED: Anti-Zombie Account) ---
   register: async (req, res) => {
+    // Variable di luar try agar bisa diakses di catch untuk rollback
+    let newUser = null;
+
     try {
       const { name, email, password } = req.body;
 
-      // 1. Validasi Input
+      // --- 1. Validasi Input Dasar ---
       if (!name || !email || !password) {
         return res.status(400).json({ message: "Semua kolom wajib diisi!" });
       }
@@ -28,21 +31,37 @@ const authController = {
           .json({ message: "Password minimal 8 karakter!" });
       }
 
-      // 2. Cek Email Terdaftar
+      // --- 2. Validasi Domain Email (DNS Lookup) ---
+      // Ini akan menolak email seperti "asal@ngawur.com" yang domainnya tidak ada
+      const domain = email.split("@")[1];
+      const isValidDomain = await new Promise((resolve) => {
+        dns.resolveMx(domain, (err, addresses) => {
+          if (err || !addresses || addresses.length === 0) resolve(false);
+          else resolve(true);
+        });
+      });
+
+      if (!isValidDomain) {
+        return res
+          .status(400)
+          .json({ message: "Domain email tidak valid atau tidak ditemukan!" });
+      }
+
+      // --- 3. Cek Email Terdaftar di Database ---
       const existingUser = await prisma.user.findUnique({ where: { email } });
       if (existingUser) {
         return res.status(400).json({ message: "Email sudah terdaftar." });
       }
 
-      // 3. Persiapan Data (Hash & Token)
+      // --- 4. Persiapan Data ---
       let username =
         email.split("@")[0] + Math.floor(1000 + Math.random() * 9000);
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(password, salt);
       const verificationToken = crypto.randomBytes(32).toString("hex");
 
-      // 4. SIMPAN KE DB (Status: Belum Verifikasi)
-      const newUser = await prisma.user.create({
+      // --- 5. SIMPAN KE DB (Transactional Check) ---
+      newUser = await prisma.user.create({
         data: {
           name,
           email,
@@ -55,25 +74,21 @@ const authController = {
         },
       });
 
-      // 5. KIRIM EMAIL (DENGAN PENGECEKAN)
-      // Kita pakai 'await' agar kita tahu email berhasil terkirim atau tidak
+      // --- 6. KIRIM EMAIL ---
       const emailSent = await emailService.sendVerificationEmail(
         newUser.email,
         verificationToken
       );
 
-      // --- LOGIC PENTING (ANTI ZOMBIE) ---
-      // Jika email gagal dikirim (misal email tidak valid/SMTP error),
-      // KITA HAPUS LAGI data user dari database.
+      // Jika gagal kirim email (misal SMTP down), hapus user langsung
       if (!emailSent) {
         await prisma.user.delete({ where: { id: newUser.id } });
-        return res.status(400).json({
-          message:
-            "Email tidak valid atau gagal mengirim verifikasi. Silakan cek kembali email Anda.",
+        return res.status(500).json({
+          message: "Gagal mengirim email verifikasi. Data dibatalkan.",
         });
       }
 
-      // 6. Audit Log (Hanya jika sukses)
+      // --- 7. Audit Log ---
       await prisma.auditLog.create({
         data: {
           action: "AUTH_REGISTER",
@@ -89,6 +104,18 @@ const authController = {
       });
     } catch (error) {
       console.error("Register Error:", error);
+
+      // --- ROLLBACK MECHANISM ---
+      // Jika terjadi error apapun (misal error audit log),
+      // tapi user terlanjur terbuat, kita hapus agar tidak jadi zombie.
+      if (newUser) {
+        try {
+          await prisma.user.delete({ where: { id: newUser.id } });
+        } catch (cleanupError) {
+          console.error("Gagal cleanup user:", cleanupError);
+        }
+      }
+
       res.status(500).json({ message: "Terjadi kesalahan server." });
     }
   },

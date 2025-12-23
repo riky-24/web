@@ -6,6 +6,7 @@ const morgan = require("morgan");
 const { rateLimit } = require("express-rate-limit");
 const { connectDB } = require("./config/database");
 const vipService = require("./services/vipResellerService");
+const { startCleanupJob } = require("./services/cleanupService");
 
 const gameRoutes = require("./routes/gameRoutes");
 const authRoutes = require("./routes/authRoutes");
@@ -117,5 +118,6 @@ app.use((err, req, res, next) => {
 connectDB().then(() => {
   app.listen(port, () => {
     console.log(`\n[SERVER] Berjalan di http://localhost:${port}`);
+    startCleanupJob();
   });
 });
