@@ -137,42 +137,90 @@ const authController = {
   },
 
   // --- LOGIN (UPDATED: Cek Verifikasi) ---
+  // --- LOGIN (FIXED: Lockout Logic Dikembalikan) ---
   login: async (req, res) => {
     try {
       const { email, password } = req.body;
       const user = await prisma.user.findUnique({ where: { email } });
 
-      // Dummy Hash (Anti-Timing Attack)
+      // 1. Dummy Hash (Anti-Timing Attack)
+      // Menggunakan hash bcrypt valid agar tidak error
       if (!user) {
-        await bcrypt.compare(password, "$2b$10$abcdefg1234567890abcdefg");
+        await bcrypt.compare(password, "$2b$10$abcdefghijklmnopqrstuv");
         return res.status(400).json({ message: "Email atau Password salah!" });
       }
 
-      // Cek Password
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) {
-        // ... (Logika Lockout tetap sama, saya singkat biar ringkas) ...
-        return res.status(400).json({ message: "Email atau Password salah!" });
-      }
-
-      // --- CEK APAKAH SUDAH VERIFIKASI? ---
-      if (!user.isVerified) {
+      // 2. CEK STATUS KUNCI (LOCKOUT CHECK) - INI YANG TADI HILANG
+      if (user.lockUntil && user.lockUntil > new Date()) {
+        const timeLeft = Math.ceil((user.lockUntil - new Date()) / 60000);
         return res.status(403).json({
-          message: "Akun belum diverifikasi. Silakan cek email Anda.",
-          needVerification: true, // Flag untuk frontend (opsional)
+          message: `Terlalu banyak percobaan gagal. Coba lagi dalam ${timeLeft} menit.`,
         });
       }
 
-      // Cek Aktif (Banned)
+      // 3. Cek Password
+      const isMatch = await bcrypt.compare(password, user.password);
+
+      if (!isMatch) {
+        // --- LOGIKA LOCKOUT (Anti Brute-Force) ---
+        const MAX_ATTEMPTS = 5;
+        const LOCK_TIME = 30 * 60 * 1000; // 30 Menit
+
+        let newAttempts = user.failedLoginAttempts + 1;
+        let newLockUntil = null;
+
+        if (newAttempts >= MAX_ATTEMPTS) {
+          newLockUntil = new Date(Date.now() + LOCK_TIME);
+        }
+
+        // Update counter ke database
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { failedLoginAttempts: newAttempts, lockUntil: newLockUntil },
+        });
+
+        // Tetap return pesan umum agar tidak bocor (User Enumeration)
+        return res.status(400).json({ message: "Email atau Password salah!" });
+      }
+
+      // 4. CEK VERIFIKASI EMAIL
+      if (!user.isVerified) {
+        return res.status(403).json({
+          message: "Akun belum diverifikasi. Silakan cek email Anda.",
+          needVerification: true,
+        });
+      }
+
+      // 5. Cek Status Aktif (Banned)
       if (!user.isActive)
         return res.status(403).json({ message: "Akun dinonaktifkan." });
 
-      // ... (Proses Generate Token & Login Sukses tetap sama) ...
+      // 6. RESET COUNTER (Login Sukses)
+      // Hapus catatan gagal karena sudah berhasil login
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          failedLoginAttempts: 0,
+          lockUntil: null,
+        },
+      });
+
+      // 7. Generate Token
       const token = jwt.sign(
         { id: user.id, role: user.role },
-        process.env.JWT_SECRET,
+        process.env.JWT_SECRET || "rahasia", // Fallback secret
         { expiresIn: "1d" }
       );
+
+      // 8. Audit Log
+      await prisma.auditLog.create({
+        data: {
+          action: "AUTH_LOGIN",
+          userId: user.id,
+          details: "User berhasil login",
+          ipAddress: req.ip,
+        },
+      });
 
       res.json({
         status: "success",
