@@ -3,7 +3,6 @@ const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
-// PERBAIKAN DI SINI: Gunakan kurung kurawal { rateLimit }
 const { rateLimit } = require("express-rate-limit");
 const { connectDB } = require("./config/database");
 const vipService = require("./services/vipResellerService");
@@ -18,34 +17,54 @@ const port = process.env.PORT || 5000;
 // ==========================================
 // 1. Security & Middlewares
 // ==========================================
+
+// --- KONFIGURASI CSP (DIPERBAIKI UNTUK GAMEDETAIL) ---
 app.use(
   helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        // Izinkan gambar dari domain sendiri dan URL eksternal terpercaya
-        imgSrc: [
-          "'self'",
-          "data:",
-          "https://cdn.wallpapersafari.com",
-          "https://wallpapers.com",
-          "https://images.unsplash.com",
-        ],
-        // Izinkan script hanya dari domain sendiri dan Midtrans
+
+        // 1. IZINKAN STYLE INLINE (PENTING!)
+        // Ini wajib agar 'style={{ backgroundImage: ... }}' di GameDetail.jsx bisa jalan.
+        // Tanpa ini, background hero akan blank/putih.
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+
+        // 2. IZINKAN FONT GOOGLE
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+
+        // 3. IZINKAN SEMUA GAMBAR
+        // Kita pakai "*" agar gambar dari link manapun (Unsplash, Google, dll) bisa muncul.
+        // Ini aman karena gambar tidak bisa dieksekusi jadi virus.
+        imgSrc: ["'self'", "data:", "blob:", "*"],
+
+        // 4. SCRIPT & KONEKSI (TETAP KETAT / AMAN)
+        // Kita HANYA mengizinkan script dari server kita sendiri dan Midtrans.
+        // Script dari domain hacker (ex: xss-attack.com) tetap AKAN DIBLOKIR browser.
         scriptSrc: [
+          "'self'",
+          "'unsafe-inline'",
+          "https://app.sandbox.midtrans.com",
+          "https://app.midtrans.com",
+        ],
+        connectSrc: [
           "'self'",
           "https://app.sandbox.midtrans.com",
           "https://app.midtrans.com",
         ],
-        // Izinkan koneksi API (fetch/axios) ke server sendiri & midtrans
-        connectSrc: ["'self'", "https://app.sandbox.midtrans.com"],
-        // Izinkan iframe (untuk Snap Midtrans)
-        frameSrc: ["'self'", "https://app.sandbox.midtrans.com"],
+        frameSrc: [
+          "'self'",
+          "https://app.sandbox.midtrans.com",
+          "https://app.midtrans.com",
+        ],
       },
     },
-    crossOriginResourcePolicy: { policy: "cross-origin" }, // Agar gambar bisa di-load
+    // Matikan proteksi ini agar browser mau memuat gambar dari domain lain
+    crossOriginResourcePolicy: false,
   })
 );
+// -----------------------------------------------------
+
 app.use(
   cors({
     origin: "http://localhost:5173",
@@ -57,31 +76,24 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan("dev"));
 
-// RATE LIMITER (Anti Spam/Brute Force)
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 menit
-  max: 10, // Maksimal 100 request per IP
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: {
-    status: "error",
-    message: "Terlalu banyak request, coba lagi nanti.",
-  },
+// --- RATE LIMITER (Anti Spam) ---
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { status: "error", message: "Terlalu banyak percobaan login." },
 });
 
 const orderLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
-  max: 2, // Order: Maksimal 10 order per menit per IP (Cukup untuk user normal)
-  message: "Anda membuat order terlalu cepat. Santai dulu.",
+  max: 5, // Limit 20 request per menit (Cukup buat user normal)
+  message: { status: "error", message: "Anda terlalu cepat. Santai dulu." },
 });
-// Pasang limiter HANYA di jalur auth agar user tidak kena limit saat cek game
-app.use("/api/auth", limiter);
 
 // ==========================================
 // 2. Routes
 // ==========================================
+app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/games", orderLimiter, gameRoutes);
-app.use("/api/auth", authRoutes);
 app.use("/api/orders", orderLimiter, orderRoutes);
 
 // Health Check
