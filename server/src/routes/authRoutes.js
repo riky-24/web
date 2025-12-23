@@ -8,4 +8,7 @@ router.post("/register", authController.register);
 // POST /api/auth/login
 router.post("/login", authController.login);
 
+// --- RUTE BARU ---
+router.post("/verify-email", authController.verifyEmail);
+
 module.exports = router;

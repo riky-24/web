@@ -10,6 +10,7 @@ import Register from "./page/Register";
 import Profile from "./page/Profile";
 import OrderStatus from "./page/OrderStatus";
 import ForgotPassword from "./page/ForgotPassword";
+import VerifyEmail from "./page/VerifyEmail";
 
 function App() {
   return (
@@ -27,6 +28,7 @@ function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/verify-email" element={<VerifyEmail />} />
 
             {/* --- PROTECTED ROUTES (Halaman User Login) --- */}
             {/* Nanti kita bisa tambahkan logika redirect jika belum login */}

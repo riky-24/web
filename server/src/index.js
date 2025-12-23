@@ -79,13 +79,13 @@ app.use(morgan("dev"));
 // --- RATE LIMITER (Anti Spam) ---
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 50,
   message: { status: "error", message: "Terlalu banyak percobaan login." },
 });
 
 const orderLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
-  max: 5, // Limit 20 request per menit (Cukup buat user normal)
+  max: 10, // Limit 20 request per menit (Cukup buat user normal)
   message: { status: "error", message: "Anda terlalu cepat. Santai dulu." },
 });
 
