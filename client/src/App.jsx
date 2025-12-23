@@ -11,6 +11,7 @@ import Profile from "./page/Profile";
 import OrderStatus from "./page/OrderStatus";
 import ForgotPassword from "./page/ForgotPassword";
 import VerifyEmail from "./page/VerifyEmail";
+import ResetPassword from "./page/ResetPassword";
 
 function App() {
   return (
@@ -33,6 +34,7 @@ function App() {
             {/* --- PROTECTED ROUTES (Halaman User Login) --- */}
             {/* Nanti kita bisa tambahkan logika redirect jika belum login */}
             <Route path="/profile" element={<Profile />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
 
             {/* --- 404 NOT FOUND --- */}
             <Route

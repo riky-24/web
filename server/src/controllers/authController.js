@@ -298,6 +298,81 @@ const authController = {
       res.status(500).json({ message: "Terjadi kesalahan server." });
     }
   },
+
+  // ==========================================
+  // 5. RESET PASSWORD (Eksekusi Ganti Password)
+  // ==========================================
+  resetPassword: async (req, res) => {
+    try {
+      const { token, newPassword, confirmPassword } = req.body;
+
+      // 1. Validasi Input
+      if (!token || !newPassword || !confirmPassword) {
+        return res.status(400).json({ message: "Semua data wajib diisi!" });
+      }
+
+      if (newPassword !== confirmPassword) {
+        return res
+          .status(400)
+          .json({ message: "Konfirmasi password tidak cocok!" });
+      }
+
+      if (newPassword.length < 8) {
+        return res
+          .status(400)
+          .json({ message: "Password minimal 8 karakter!" });
+      }
+
+      // 2. Cari User berdasarkan Token & Cek Kedaluwarsa
+      const user = await prisma.user.findFirst({
+        where: {
+          resetPasswordToken: token,
+          resetPasswordExpires: {
+            gt: new Date(), // Harus lebih besar dari waktu sekarang (belum expired)
+          },
+        },
+      });
+
+      if (!user) {
+        return res
+          .status(400)
+          .json({ message: "Token tidak valid atau sudah kedaluwarsa." });
+      }
+
+      // 3. Hash Password Baru
+      const salt = await bcrypt.genSalt(10);
+      const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+      // 4. Update User & Hapus Token Reset
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          password: hashedPassword,
+          resetPasswordToken: null, // Hapus token agar tidak bisa dipakai lagi
+          resetPasswordExpires: null,
+        },
+      });
+
+      // 5. Audit Log
+      await prisma.auditLog.create({
+        data: {
+          action: "AUTH_RESET_PASSWORD",
+          userId: user.id,
+          details: "Password reset success",
+          ipAddress: req.ip,
+        },
+      });
+
+      res.json({
+        status: "success",
+        message:
+          "Password berhasil diubah! Silakan login dengan password baru.",
+      });
+    } catch (error) {
+      console.error("Reset Password Error:", error);
+      res.status(500).json({ message: "Terjadi kesalahan server." });
+    }
+  },
 };
 
 module.exports = authController;
