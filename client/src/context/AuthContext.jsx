@@ -1,10 +1,15 @@
-import { createContext, useState, useEffect } from "react";
+import { createContext, useState, useEffect, useContext } from "react";
 import api from "../services/api";
 
 // 1. Buat Context
-export const AuthContext = createContext();
+const AuthContext = createContext();
 
-// 2. Buat Provider
+// 2. EXPORT useAuth (INI YANG BIKIN BLANK PUTIH KALAU HILANG)
+export const useAuth = () => {
+  return useContext(AuthContext);
+};
+
+// 3. Provider
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem("token"));
@@ -13,52 +18,62 @@ export const AuthProvider = ({ children }) => {
   // Cek status login saat aplikasi dimuat
   useEffect(() => {
     const initAuth = async () => {
-      if (token) {
+      const storedToken = localStorage.getItem("token");
+      const storedUser = localStorage.getItem("user");
+
+      if (storedToken && storedUser) {
         try {
-          // Set default header Authorization untuk semua request axios
-          api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
-
-          // Opsional: Anda bisa tambahkan endpoint /auth/me di backend untuk validasi token
-          // const res = await api.get('/auth/me');
-          // setUser(res.data.user);
-
-          // Untuk sementara, kita anggap token valid & user tersimpan (bisa dikembangkan)
-          const storedUser = localStorage.getItem("user");
-          if (storedUser) {
-            setUser(JSON.parse(storedUser));
-          }
-        } catch (err) {
-          console.error("Auth Error:", err);
+          // Set token ke header axios agar request valid
+          api.defaults.headers.common[
+            "Authorization"
+          ] = `Bearer ${storedToken}`;
+          setToken(storedToken);
+          setUser(JSON.parse(storedUser));
+        } catch (error) {
+          console.error("Auth Init Error:", error);
           logout();
         }
       } else {
-        delete api.defaults.headers.common["Authorization"];
+        logout();
       }
       setLoading(false);
     };
 
     initAuth();
-  }, [token]);
+  }, []);
 
-  // Fungsi Login
-  const login = (userData, userToken) => {
-    setUser(userData);
-    setToken(userToken);
-    localStorage.setItem("token", userToken);
-    localStorage.setItem("user", JSON.stringify(userData)); // Simpan data user sederhana
+  // --- FUNGSI LOGIN YANG BENAR (Connect ke API) ---
+  const login = async (email, password) => {
+    try {
+      // 1. Tembak API Backend
+      const response = await api.post("/auth/login", { email, password });
 
-    // Set token ke axios agar request selanjutnya otomatis terotentikasi
-    api.defaults.headers.common["Authorization"] = `Bearer ${userToken}`;
+      // 2. Ambil data dari respon backend (pastikan strukturnya sesuai controller)
+      const { token, user } = response.data.data;
+
+      // 3. Simpan ke State & LocalStorage
+      setUser(user);
+      setToken(token);
+      localStorage.setItem("token", token);
+      localStorage.setItem("user", JSON.stringify(user));
+
+      // 4. Set Header Axios Global
+      api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+
+      return response;
+    } catch (error) {
+      // Lempar error agar bisa ditangkap catch di Login.jsx
+      throw error;
+    }
   };
 
-  // Fungsi Logout
+  // --- FUNGSI LOGOUT ---
   const logout = () => {
     setUser(null);
     setToken(null);
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     delete api.defaults.headers.common["Authorization"];
-    window.location.href = "/login"; // Redirect paksa ke login
   };
 
   return (
