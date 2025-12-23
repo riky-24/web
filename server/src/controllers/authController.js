@@ -50,7 +50,7 @@ const authController = {
       // --- 3. Cek Email Terdaftar di Database ---
       const existingUser = await prisma.user.findUnique({ where: { email } });
       if (existingUser) {
-        return res.status(400).json({ message: "Email sudah terdaftar." });
+        return res.status(400).json({ message: "Masalah jaringan coba lagi." });
       }
 
       // --- 4. Persiapan Data ---
