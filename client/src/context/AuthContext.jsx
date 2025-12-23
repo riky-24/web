@@ -1,21 +1,27 @@
 import { createContext, useState, useEffect, useContext } from "react";
 import api from "../services/api";
 
-// 1. Buat Context
-const AuthContext = createContext();
+// =================================================================
+// 1. MEMBUAT CONTEXT & EXPORT (WAJIB ADA 'export' AGAR TIDAK ERROR)
+// =================================================================
+export const AuthContext = createContext();
 
-// 2. EXPORT useAuth (INI YANG BIKIN BLANK PUTIH KALAU HILANG)
+// =================================================================
+// 2. CUSTOM HOOK (Agar bisa dipanggil pakai useAuth() di file lain)
+// =================================================================
 export const useAuth = () => {
   return useContext(AuthContext);
 };
 
-// 3. Provider
+// =================================================================
+// 3. PROVIDER (Pembungkus Logic Login)
+// =================================================================
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem("token"));
   const [loading, setLoading] = useState(true);
 
-  // Cek status login saat aplikasi dimuat
+  // --- CEK STATUS LOGIN SAAT APLIKASI DIMUAT ---
   useEffect(() => {
     const initAuth = async () => {
       const storedToken = localStorage.getItem("token");
@@ -34,6 +40,7 @@ export const AuthProvider = ({ children }) => {
           logout();
         }
       } else {
+        // Bersihkan sisa-sisa jika data tidak lengkap
         logout();
       }
       setLoading(false);
@@ -42,13 +49,13 @@ export const AuthProvider = ({ children }) => {
     initAuth();
   }, []);
 
-  // --- FUNGSI LOGIN YANG BENAR (Connect ke API) ---
+  // --- FUNGSI LOGIN (REQ KE BACKEND) ---
   const login = async (email, password) => {
     try {
       // 1. Tembak API Backend
       const response = await api.post("/auth/login", { email, password });
 
-      // 2. Ambil data dari respon backend (pastikan strukturnya sesuai controller)
+      // 2. Ambil data dari respon backend
       const { token, user } = response.data.data;
 
       // 3. Simpan ke State & LocalStorage
@@ -74,6 +81,9 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     delete api.defaults.headers.common["Authorization"];
+
+    // Opsional: Redirect ke halaman login
+    // window.location.href = "/login";
   };
 
   return (
@@ -87,6 +97,7 @@ export const AuthProvider = ({ children }) => {
         loading,
       }}
     >
+      {/* Cegah render anak komponen sebelum cek login selesai */}
       {!loading && children}
     </AuthContext.Provider>
   );
