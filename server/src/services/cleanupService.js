@@ -8,7 +8,7 @@ const startCleanupJob = () => {
       console.log("🧹 [Cleanup] Sedang mencari akun zombie...");
 
       // Batas waktu: 1 Jam yang lalu
-      const oneHourAgo = new Date(Date.now() - 1 * 60 * 1000);
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
 
       // Cari & Hapus user yang belum verifikasi lebih dari 1 jam
       const deletedUsers = await prisma.user.deleteMany({
