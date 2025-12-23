@@ -48,4 +48,38 @@ const sendVerificationEmail = async (toEmail, token) => {
   }
 };
 
-module.exports = { sendVerificationEmail };
+// 2. --- TAMBAHAN BARU: Fungsi Kirim Reset Password ---
+const sendResetPasswordEmail = async (toEmail, token) => {
+  const resetLink = `${process.env.CLIENT_URL}/reset-password?token=${token}`;
+
+  const mailOptions = {
+    from: `"Game Topup Security" <${process.env.SMTP_USER}>`,
+    to: toEmail,
+    subject: "Reset Password Akun Anda",
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 10px;">
+        <h2 style="color: #DC2626; text-align: center;">Permintaan Reset Password</h2>
+        <p>Halo,</p>
+        <p>Kami menerima permintaan untuk mereset password akun Anda. Jika ini benar Anda, silakan klik tombol di bawah:</p>
+        
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${resetLink}" style="background-color: #DC2626; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Reset Password Saya</a>
+        </div>
+        
+        <p style="color: #666; font-size: 12px;">Link ini hanya berlaku selama 1 jam.</p>
+        <p style="color: #666; font-size: 12px;">Jika Anda tidak meminta reset password, abaikan email ini.</p>
+      </div>
+    `,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`[Email] Reset Password terkirim ke: ${toEmail}`);
+    return true;
+  } catch (error) {
+    console.error("[Email] Gagal mengirim reset password:", error);
+    return false;
+  }
+};
+
+module.exports = { sendVerificationEmail, sendResetPasswordEmail };

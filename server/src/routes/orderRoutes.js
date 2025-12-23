@@ -1,35 +1,36 @@
 const express = require("express");
 const router = express.Router();
 const orderController = require("../controllers/orderController");
-const authMiddleware = require("../middlewares/authMiddleware");
+// IMPORT YANG BENAR (Ambil kedua fungsi)
+const {
+  authMiddleware,
+  authenticateToken,
+} = require("../middlewares/authMiddleware");
 
 // =========================================================================
-// 1. WEBHOOK NOTIFIKASI (WAJIB PALING ATAS & PUBLIC)
+// 1. WEBHOOK NOTIFIKASI (PUBLIC)
 // =========================================================================
-// Endpoint ini menerima sinyal dari Midtrans (Server-to-Server).
-// Tidak membawa token user, jadi harus DIEKSEKUSI SEBELUM authMiddleware.
+// Tidak boleh kena middleware apapun karena dipanggil oleh Server Midtrans
 router.post("/notification", orderController.handleNotification);
 
 // =========================================================================
-// 2. MIDDLEWARE AUTHENTICATION
+// 2. GLOBAL MIDDLEWARE (SOFT CHECK)
 // =========================================================================
-// Semua rute di bawah baris ini akan dicek token-nya.
-// Jika user login, req.user akan terisi. Jika guest, req.user = null.
+// Cek token di semua request ke bawah. Kalau valid, req.user terisi.
 router.use(authMiddleware);
 
 // =========================================================================
-// 3. FITUR TRANSAKSI USER
+// 3. ROUTES
 // =========================================================================
 
-// POST /api/orders -> Buat Pesanan Baru (Bisa User / Guest)
+// Buat Pesanan (Bisa Guest / User)
 router.post("/", orderController.createOrder);
 
-// GET /api/orders/my-orders -> Riwayat Transaksi Saya (Wajib Login)
-// Controller 'getMyOrders' akan menolak jika req.user kosong.
-router.get("/my-orders", orderController.getMyOrders);
+// Riwayat Transaksi (WAJIB LOGIN - Pakai authenticateToken)
+// Ini yang bikin error tadi karena authenticateToken belum didefinisikan
+router.get("/my-orders", authenticateToken, orderController.getMyOrders);
 
-// GET /api/orders/:orderId -> Cek Detail/Struk (Public)
-// Ditaruh paling bawah agar tidak bentrok dengan path lain (seperti /notification)
+// Cek Detail Order (Bisa Guest / User)
 router.get("/:orderId", orderController.getOrderDetail);
 
 module.exports = router;

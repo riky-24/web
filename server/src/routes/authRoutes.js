@@ -10,5 +10,6 @@ router.post("/login", authController.login);
 
 // --- RUTE BARU ---
 router.post("/verify-email", authController.verifyEmail);
+router.post("/forgot-password", authController.forgotPassword);
 
 module.exports = router;

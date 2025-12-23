@@ -251,6 +251,36 @@ const orderController = {
       res.status(500).json({ message: "Error server" });
     }
   },
+
+  // ==========================================
+  // AMBIL RIWAYAT TRANSAKSI USER (Profile)
+  // ==========================================
+  getMyOrders: async (req, res) => {
+    try {
+      // req.user.id didapat dari authMiddleware (Token JWT)
+      const userId = req.user.id;
+
+      const orders = await prisma.order.findMany({
+        where: { userId: userId }, // Hanya ambil punya user yang login
+        include: {
+          product: {
+            include: {
+              game: true, // Ambil info Game juga (Mobile Legends, dll)
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" }, // Urutkan dari yang terbaru
+      });
+
+      res.json({
+        status: "success",
+        data: orders,
+      });
+    } catch (error) {
+      console.error("My Orders Error:", error);
+      res.status(500).json({ message: "Gagal mengambil data transaksi." });
+    }
+  },
 };
 
 module.exports = orderController;

@@ -1,26 +1,43 @@
 const jwt = require("jsonwebtoken");
 
+// 1. SOFT AUTH (Bisa Guest / User)
+// Digunakan global agar req.user terisi jika ada token
 const authMiddleware = (req, res, next) => {
-  // 1. Ambil token dari Header (Authorization: Bearer <token>)
   const authHeader = req.headers.authorization;
 
   if (authHeader && authHeader.startsWith("Bearer ")) {
     const token = authHeader.split(" ")[1];
-
     try {
-      // 2. Verifikasi Token
       const decoded = jwt.verify(token, process.env.JWT_SECRET || "rahasia");
-
-      // 3. Simpan data user ke request agar bisa dipakai di controller
       req.user = decoded;
     } catch (error) {
-      console.error("Token Invalid:", error.message);
-      // Jangan return error, biarkan lanjut sebagai Guest (req.user undefined)
-      // Kecuali untuk rute yang benar-benar private (nanti kita atur di routes)
+      console.error("Token Invalid (Soft Check):", error.message);
+      // Lanjut saja, nanti req.user undefined (dianggap Guest)
     }
   }
-
   next();
 };
 
-module.exports = authMiddleware;
+// 2. STRICT AUTH (Wajib Login)
+// Digunakan khusus untuk route yang butuh data user (misal: My Orders, Profile)
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader && authHeader.split(" ")[1];
+
+  if (!token) {
+    return res.status(401).json({ message: "Akses ditolak. Silakan login." });
+  }
+
+  jwt.verify(token, process.env.JWT_SECRET || "rahasia", (err, user) => {
+    if (err) {
+      return res
+        .status(403)
+        .json({ message: "Token tidak valid atau kedaluwarsa." });
+    }
+    req.user = user;
+    next();
+  });
+};
+
+// Export sebagai Object agar bisa diambil salah satu atau keduanya
+module.exports = { authMiddleware, authenticateToken };

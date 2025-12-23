@@ -8,64 +8,40 @@ const authController = {
   // ==========================================
   // 1. REGISTER (Updated: Anti-Zombie Account)
   // ==========================================
+  // --- REGISTER (UPDATED: Anti-Zombie Account) ---
   register: async (req, res) => {
     try {
-      const { name, email, password, confirmPassword } = req.body;
+      const { name, email, password } = req.body;
 
-      // --- VALIDASI INPUT ---
+      // 1. Validasi Input
       if (!name || !email || !password) {
         return res.status(400).json({ message: "Semua kolom wajib diisi!" });
       }
-
-      // Validasi XSS (Nama tidak boleh ada simbol aneh)
       if (/[<>;]/.test(name)) {
         return res
           .status(400)
           .json({ message: "Nama mengandung karakter terlarang!" });
       }
-
-      // Validasi Password Strength
       if (password.length < 8) {
         return res
           .status(400)
           .json({ message: "Password minimal 8 karakter!" });
       }
 
-      const commonPasswords = [
-        "12345678",
-        "password",
-        "qwertyui",
-        "rahasia",
-        "admin123",
-      ];
-      if (commonPasswords.includes(password.toLowerCase())) {
-        return res
-          .status(400)
-          .json({ message: "Password terlalu umum, gunakan yang lebih kuat!" });
-      }
-
-      // Cek Email Terdaftar
+      // 2. Cek Email Terdaftar
       const existingUser = await prisma.user.findUnique({ where: { email } });
       if (existingUser) {
-        return res
-          .status(400)
-          .json({ message: "Registrasi gagal. Cek kembali data Anda." });
+        return res.status(400).json({ message: "Email sudah terdaftar." });
       }
 
-      // --- PROSES PEMBUATAN AKUN ---
-
-      // 1. Generate Username Unik
+      // 3. Persiapan Data (Hash & Token)
       let username =
         email.split("@")[0] + Math.floor(1000 + Math.random() * 9000);
-
-      // 2. Hash Password
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(password, salt);
-
-      // 3. Generate Token Verifikasi
       const verificationToken = crypto.randomBytes(32).toString("hex");
 
-      // 4. Simpan ke Database (Status: Belum Verifikasi)
+      // 4. SIMPAN KE DB (Status: Belum Verifikasi)
       const newUser = await prisma.user.create({
         data: {
           name,
@@ -80,26 +56,24 @@ const authController = {
       });
 
       // 5. KIRIM EMAIL (DENGAN PENGECEKAN)
+      // Kita pakai 'await' agar kita tahu email berhasil terkirim atau tidak
       const emailSent = await emailService.sendVerificationEmail(
         newUser.email,
         verificationToken
       );
 
-      // --- LOGIC ANTI-ZOMBIE ACCOUNT ---
-      // Jika email gagal dikirim (SMTP Error), hapus user yang baru dibuat.
-      // Supaya user bisa mencoba daftar lagi dan tidak nyangkut.
+      // --- LOGIC PENTING (ANTI ZOMBIE) ---
+      // Jika email gagal dikirim (misal email tidak valid/SMTP error),
+      // KITA HAPUS LAGI data user dari database.
       if (!emailSent) {
         await prisma.user.delete({ where: { id: newUser.id } });
-        return res
-          .status(500)
-          .json({
-            message:
-              "Gagal mengirim email verifikasi. Silakan coba lagi nanti.",
-          });
+        return res.status(400).json({
+          message:
+            "Email tidak valid atau gagal mengirim verifikasi. Silakan cek kembali email Anda.",
+        });
       }
-      // ----------------------------------
 
-      // 6. Audit Log
+      // 6. Audit Log (Hanya jika sukses)
       await prisma.auditLog.create({
         data: {
           action: "AUTH_REGISTER",
@@ -111,8 +85,7 @@ const authController = {
 
       res.status(201).json({
         status: "success",
-        message:
-          "Registrasi berhasil! Silakan cek email Anda untuk verifikasi.",
+        message: "Registrasi berhasil! Cek email Anda untuk verifikasi akun.",
       });
     } catch (error) {
       console.error("Register Error:", error);
@@ -180,11 +153,9 @@ const authController = {
       // Cek Lockout
       if (user.lockUntil && user.lockUntil > new Date()) {
         const timeLeft = Math.ceil((user.lockUntil - new Date()) / 60000);
-        return res
-          .status(403)
-          .json({
-            message: `Akun terkunci. Coba lagi dalam ${timeLeft} menit.`,
-          });
+        return res.status(403).json({
+          message: `Akun terkunci. Coba lagi dalam ${timeLeft} menit.`,
+        });
       }
 
       // Cek Password
@@ -257,6 +228,47 @@ const authController = {
     } catch (error) {
       console.error("Login Error:", error);
       res.status(500).json({ message: "Gagal login." });
+    }
+  },
+
+  // ==========================================
+  // 4. FORGOT PASSWORD (Kirim Link Reset)
+  // ==========================================
+  forgotPassword: async (req, res) => {
+    try {
+      const { email } = req.body;
+
+      // 1. Cari User
+      const user = await prisma.user.findUnique({ where: { email } });
+
+      if (!user) {
+        // SECURITY: Jangan kasih tau kalau email tidak ada (Anti-Enumeration)
+        // Pura-pura sukses agar hacker tidak bisa scan database email.
+        return res.status(200).json({
+          message: "Link reset password telah dikirim ke email Anda.",
+        });
+      }
+
+      // 2. Generate Token Reset
+      const resetToken = crypto.randomBytes(32).toString("hex");
+      const resetTokenExpires = new Date(Date.now() + 3600000); // 1 Jam dari sekarang
+
+      // 3. Simpan Token ke Database
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          resetPasswordToken: resetToken,
+          resetPasswordExpires: resetTokenExpires,
+        },
+      });
+
+      // 4. Kirim Email
+      await emailService.sendResetPasswordEmail(user.email, resetToken);
+
+      res.json({ message: "Link reset password telah dikirim ke email Anda." });
+    } catch (error) {
+      console.error("Forgot Password Error:", error);
+      res.status(500).json({ message: "Terjadi kesalahan server." });
     }
   },
 };
