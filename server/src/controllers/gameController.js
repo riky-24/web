@@ -1,71 +1,81 @@
-const vipService = require("../services/vipResellerService");
+const gameService = require("../services/gameService");
 
 const gameController = {
-  // ==========================================
-  // 1. GET ALL GAMES (List Game)
-  // ==========================================
-  getGames: async (req, res) => {
+  // 1. Ambil Semua List Game
+  getAllGames: async (req, res) => {
     try {
-      // Ambil daftar game dari cache atau provider
-      // (Contoh logic sederhana)
-      const games = await vipService.getGameList();
-
-      // Di sini kita bisa filter game yang sedang gangguan, dll.
+      const games = await gameService.getAllGames();
       res.json({ status: "success", data: games });
     } catch (error) {
-      console.error("Get Games Error:", error);
-      res.status(500).json({ message: "Gagal memuat daftar game." });
+      console.error("[Controller] GetAllGames Error:", error);
+      res
+        .status(500)
+        .json({ status: "error", message: "Gagal mengambil data game" });
     }
   },
 
-  // ==========================================
-  // 2. GET GAME DETAIL (Penting: Pricing Logic)
-  // ==========================================
+  // 2. Ambil Detail Game (Support Dynamic Pricing)
   getGameDetail: async (req, res) => {
     try {
-      const { slug } = req.params; // misal: 'mobile-legends'
+      const { slug } = req.params;
 
-      // 1. Ambil Data Produk dari Provider
-      const gameData = await vipService.getGameDetail(slug);
+      // Deteksi Role user dari token (Middleware Auth)
+      // Jika user belum login, req.user undefined, default jadi GUEST di service
+      const role = req.user ? req.user.role : "GUEST";
 
-      if (!gameData) {
-        return res.status(404).json({ message: "Game tidak ditemukan." });
+      const game = await gameService.getGameDetail(slug, role);
+
+      if (!game) {
+        return res
+          .status(404)
+          .json({ status: "error", message: "Game tidak ditemukan" });
       }
 
-      // 2. LOGIKA HARGA DINAMIS (Impact dari AuthMiddleware)
-      // Cek apakah user sedang login dan punya role khusus
-      const userRole = req.user ? req.user.role : "GUEST";
+      res.json({ status: "success", data: game });
+    } catch (error) {
+      console.error("[Controller] GetGameDetail Error:", error);
+      res
+        .status(500)
+        .json({ status: "error", message: "Gagal mengambil detail game" });
+    }
+  },
 
-      const productsWithPrice = gameData.products.map((item) => {
-        let finalPrice = item.price;
+  // 3. Cek ID Player
+  checkAccount: async (req, res) => {
+    try {
+      const { slug, userId, zoneId } = req.body;
 
-        // Aturan Margin
-        if (userRole === "RESELLER") {
-          finalPrice = item.price * 1.02; // Untung tipis 2% buat Reseller
-        } else if (userRole === "VIP") {
-          finalPrice = item.price * 1.03; // Untung 3% buat VIP
-        } else {
-          finalPrice = item.price * 1.05; // Untung 5% buat User Biasa / Guest
-        }
+      if (!slug || !userId) {
+        return res
+          .status(400)
+          .json({ status: "error", message: "Data tidak lengkap" });
+      }
 
-        return {
-          ...item,
-          price: Math.ceil(finalPrice), // Pembulatan harga
-          originalPrice: undefined, // HAPUS harga modal agar tidak bocor ke publik!
-        };
-      });
+      const result = await gameService.validateGameAccount(
+        slug,
+        userId,
+        zoneId
+      );
+
+      if (result.result === false) {
+        return res.status(400).json({
+          status: "error",
+          message: result.message || "ID Player tidak ditemukan",
+        });
+      }
 
       res.json({
         status: "success",
         data: {
-          name: gameData.name,
-          slug: gameData.slug,
-          products: productsWithPrice,
+          username: result.data.userName || result.data,
+          originalResponse: result, // Opsional debug
         },
       });
     } catch (error) {
-      console.error("Game Detail Error:", error);
-      res.status(500).json({ message: "Gagal memuat detail game." });
+      console.error("[Controller] CheckAccount Error:", error);
+      res
+        .status(500)
+        .json({ status: "error", message: "Gagal mengecek ID Player" });
     }
   },
 };

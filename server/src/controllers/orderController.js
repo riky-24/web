@@ -1,155 +1,83 @@
-const { prisma } = require("../config/database");
-const vipService = require("../services/vipResellerService");
+const orderService = require("../services/orderService");
 
 const orderController = {
-  // ==========================================
-  // 1. BUAT ORDER BARU
-  // ==========================================
+  // 1. BUAT PESANAN (User Checkout)
   createOrder: async (req, res) => {
     try {
-      // [CLEANUP] Tidak perlu cek if (!req.user) lagi
-      // karena sudah dijaga oleh middleware 'requireAuth' di routes.
+      // req.user bisa ada (User) atau null (Guest)
+      const user = req.user || null;
+      const orderData = req.body; // { productId, gameUserId, zoneId, method }
 
-      const userId = req.user.id; // Ambil ID dari token
-      const { serviceCode, target, serverId } = req.body;
-
-      if (!serviceCode || !target) {
-        return res.status(400).json({ message: "Data pesanan tidak lengkap." });
+      // Validasi input minimal di controller (tetap perlu, tapi simple saja)
+      if (!orderData.productId || !orderData.gameUserId) {
+        return res.status(400).json({ message: "Data pesanan tidak lengkap" });
       }
 
-      // 1. Cek User di DB (untuk memastikan saldo & validitas)
-      const user = await prisma.user.findUnique({ where: { id: userId } });
-      if (!user)
-        return res.status(404).json({ message: "User tidak ditemukan." });
+      const result = await orderService.createTransaction(user, orderData);
 
-      // 2. Cek Layanan & Harga dari VIP Reseller (atau Cache DB)
-      // (Asumsi: Anda punya fungsi untuk cek harga, contoh sederhana:)
-      const product = await vipService.checkPrice(serviceCode);
-      if (!product)
-        return res.status(400).json({ message: "Layanan tidak tersedia." });
-
-      // Logic Margin Profit (Bisa dipisah ke helper)
-      const margin = 1.05; // Contoh untung 5%
-      const sellingPrice = Math.ceil(product.price * margin);
-
-      // 3. Cek Saldo User
-      if (user.balance < sellingPrice) {
-        return res.status(400).json({ message: "Saldo tidak mencukupi." });
-      }
-
-      // 4. Kurangi Saldo (Gunakan Transaction agar aman!)
-      // Prisma Transaction: Pastikan saldo terpotong DAN order tercatat, atau tidak sama sekali.
-      const newOrder = await prisma.$transaction(async (tx) => {
-        // A. Potong Saldo
-        await tx.user.update({
-          where: { id: userId },
-          data: { balance: { decrement: sellingPrice } },
-        });
-
-        // B. Buat Record Order Lokal
-        const order = await tx.order.create({
-          data: {
-            userId: userId,
-            trxId: `TRX-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-            serviceCode: serviceCode,
-            target: target,
-            serverId: serverId || null,
-            price: sellingPrice,
-            status: "PROCESSING", // Status awal
-            providerOrderId: null, // Nanti diisi setelah tembak VIP
-          },
-        });
-
-        return order;
+      res.json({
+        status: "success",
+        data: result,
       });
-
-      // 5. Tembak ke Provider (VIP Reseller)
-      // Dilakukan di luar transaksi DB agar tidak menahan koneksi database lama-lama
-      const providerResponse = await vipService.placeOrder(
-        serviceCode,
-        target,
-        serverId
-      );
-
-      // 6. Update Status Order berdasarkan respon Provider
-      if (providerResponse.status === "success") {
-        await prisma.order.update({
-          where: { id: newOrder.id },
-          data: {
-            status: "PENDING", // Atau 'SUCCESS' tergantung respon VIP
-            providerOrderId: providerResponse.trxid,
-          },
-        });
-
-        res.status(201).json({
-          status: "success",
-          message: "Pesanan berhasil diproses!",
-          data: newOrder,
-        });
-      } else {
-        // [REFUND] Jika provider gagal, kembalikan saldo user
-        await prisma.$transaction([
-          prisma.user.update({
-            where: { id: userId },
-            data: { balance: { increment: sellingPrice } },
-          }),
-          prisma.order.update({
-            where: { id: newOrder.id },
-            data: { status: "FAILED", note: "Provider Error" },
-          }),
-        ]);
-
-        res
-          .status(500)
-          .json({
-            message: "Gagal memproses ke provider. Saldo dikembalikan.",
-          });
-      }
     } catch (error) {
-      console.error("Order Error:", error);
-      res.status(500).json({ message: "Terjadi kesalahan server saat order." });
+      console.error("[Controller] CreateOrder Error:", error.message);
+      // Tangkap error spesifik dari service jika ada (misal Product not found)
+      const statusCode = error.message.includes("tidak ditemukan") ? 404 : 500;
+      res.status(statusCode).json({ status: "error", message: error.message });
     }
   },
 
-  // ==========================================
-  // 2. RIWAYAT ORDER
-  // ==========================================
+  // 2. WEBHOOK MIDTRANS (Sangat Bersih!)
+  handleNotification: async (req, res) => {
+    try {
+      const notification = req.body;
+
+      // Serahkan semua urusan validasi & update ke service
+      await orderService.processPaymentNotification(notification);
+
+      // Selalu return 200 ke Midtrans agar tidak dikirim ulang terus menerus
+      res.status(200).json({ status: "ok" });
+    } catch (error) {
+      console.error("[Controller] Webhook Error:", error.message);
+
+      // Jika error karena signature, beri 403
+      if (error.message.includes("Invalid Signature")) {
+        return res.status(403).json({ message: "Invalid Signature" });
+      }
+
+      res.status(500).json({ message: "Internal Server Error" });
+    }
+  },
+
+  // 3. RIWAYAT TRANSAKSI USER
   getMyOrders: async (req, res) => {
     try {
-      const orders = await prisma.order.findMany({
-        where: { userId: req.user.id },
-        orderBy: { createdAt: "desc" },
-        take: 50, // Limit 50 transaksi terakhir biar ringan
-      });
-
+      // req.user.id dijamin ada oleh middleware requireAuth
+      const orders = await orderService.getUserHistory(req.user.id);
       res.json({ status: "success", data: orders });
     } catch (error) {
-      console.error("Get Orders Error:", error);
-      res.status(500).json({ message: "Gagal mengambil riwayat order." });
+      console.error("[Controller] MyOrders Error:", error);
+      res.status(500).json({ message: "Gagal mengambil data transaksi." });
     }
   },
 
-  // ==========================================
-  // 3. DETAIL ORDER
-  // ==========================================
+  // 4. DETAIL TRANSAKSI
   getOrderDetail: async (req, res) => {
     try {
-      const { trxId } = req.params;
+      const { orderId } = req.params;
+      const userId = req.user ? req.user.id : null; // Support admin/user view context
 
-      const order = await prisma.order.findFirst({
-        where: {
-          trxId: trxId,
-          userId: req.user.id, // Security: Pastikan hanya pemilik yang bisa lihat
-        },
-      });
+      const order = await orderService.getOrderDetail(orderId, userId);
 
-      if (!order)
-        return res.status(404).json({ message: "Transaksi tidak ditemukan." });
+      if (!order) {
+        return res.status(404).json({ message: "Order tidak ditemukan" });
+      }
 
       res.json({ status: "success", data: order });
     } catch (error) {
-      console.error("Order Detail Error:", error);
-      res.status(500).json({ message: "Gagal mengambil detail order." });
+      console.error("[Controller] OrderDetail Error:", error.message);
+      const statusCode = error.message.includes("Unauthorized") ? 403 : 500;
+      res.status(statusCode).json({ message: error.message });
     }
   },
 };
