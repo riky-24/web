@@ -3,18 +3,13 @@ const crypto = require("crypto");
 const config = require("../config/vipreseller");
 
 // Helper: Membuat Signature MD5 (API ID + API KEY)
+// [Security] Menggunakan fungsi crypto bawaan, bukan fungsi global md5() yang tidak terdefinisi
 const generateSignature = () => {
-  // 1. Validasi: Pastikan Config ada
   if (!config.apiId || !config.apiKey) {
     throw new Error(
       "[VIP CONFIG ERROR] VIP_ID atau VIP_KEY belum diset di .env!"
     );
   }
-
-  // 2. Debugging: Cek nilai di terminal (Hapus nanti jika production)
-  // console.log('DEBUG VIP:', { id: config.apiId, key: config.apiKey });
-
-  // 3. Pastikan data berbentuk String agar tidak jadi NaN
   const data = String(config.apiId) + String(config.apiKey);
   return crypto.createHash("md5").update(data).digest("hex");
 };
@@ -22,8 +17,7 @@ const generateSignature = () => {
 const vipResellerService = {
   getProfile: async () => {
     try {
-      const signature = generateSignature(); // Generate sign
-
+      const signature = generateSignature();
       const payload = new URLSearchParams();
       payload.append("key", config.apiKey);
       payload.append("sign", signature);
@@ -31,14 +25,12 @@ const vipResellerService = {
       const response = await axios.post(`${config.baseUrl}/profile`, payload, {
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
       });
-
       return response.data;
     } catch (error) {
-      // Log error lebih detail
-      console.error("[VIP Service Error]", error.message);
-      if (error.response) {
-        console.error("Response Data:", error.response.data);
-      }
+      console.error(
+        "[VIP Profile Error]",
+        error?.response?.data || error.message
+      );
       throw error;
     }
   },
@@ -46,7 +38,6 @@ const vipResellerService = {
   checkGameId: async (gameCode, userId, zoneId = "") => {
     try {
       const signature = generateSignature();
-
       const payload = new URLSearchParams();
       payload.append("key", config.apiKey);
       payload.append("sign", signature);
@@ -62,31 +53,76 @@ const vipResellerService = {
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
         }
       );
-
       return response.data;
     } catch (error) {
-      console.error("[VIP Service Error]", error.message);
+      console.error(
+        "[VIP CheckID Error]",
+        error?.response?.data || error.message
+      );
       throw error;
     }
   },
 
-  // Tambahkan fungsi ini untuk memastikan nasib transaksi
-  async checkStatus(trxId) {
-    const sign = md5(process.env.VIP_API_ID + process.env.VIP_API_KEY);
-    const formData = new FormData();
-    formData.append("key", process.env.VIP_API_KEY);
-    formData.append("sign", sign);
-    formData.append("type", "status");
-    formData.append("trx_id", trxId); // Cek berdasarkan ID Order kita
-
+  // [Fix Critical] Fungsi ini sebelumnya TIDAK ADA, menyebabkan server crash saat user bayar.
+  transaction: async (trxId, serviceCode, target, zone = "") => {
     try {
+      const signature = generateSignature();
+
+      // Menggunakan URLSearchParams agar konsisten dengan endpoint lain
+      const payload = new URLSearchParams();
+      payload.append("key", config.apiKey);
+      payload.append("sign", signature);
+      payload.append("type", "order"); // Tipe request order
+      payload.append("service", serviceCode); // Kode layanan (misal: ML86)
+      payload.append("data_no", `${target}${zone ? zone : ""}`); // Nomor tujuan gabungan
+      payload.append("trx_id", trxId); // ID referensi unik dari kita
+
+      console.log(`[VIP TRX] Sending Order: ${trxId} - Code: ${serviceCode}`);
+
       const response = await axios.post(
-        "https://vip-reseller.co.id/api/game-feature",
-        formData
+        `${config.baseUrl}/game-feature`,
+        payload,
+        {
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        }
       );
+
       return response.data;
     } catch (error) {
-      console.error("Cek Status Error:", error);
+      console.error(
+        "[VIP Transaction Error]",
+        error?.response?.data || error.message
+      );
+      // Return object error agar tidak throw dan memutus flow controller
+      return {
+        result: false,
+        message: error?.response?.data?.message || "Connection Error",
+      };
+    }
+  },
+
+  // [Fix Bug] Memperbaiki referensi error 'md5 is not defined' dan penggunaan process.env langsung
+  checkStatus: async (trxId) => {
+    try {
+      const signature = generateSignature(); // Gunakan helper yang sudah benar
+
+      const payload = new URLSearchParams();
+      payload.append("key", config.apiKey);
+      payload.append("sign", signature);
+      payload.append("type", "status");
+      payload.append("trx_id", trxId);
+
+      const response = await axios.post(
+        `${config.baseUrl}/game-feature`,
+        payload,
+        {
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        }
+      );
+
+      return response.data;
+    } catch (error) {
+      console.error("[VIP CheckStatus Error]", error?.message);
       return null;
     }
   },

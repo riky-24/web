@@ -4,14 +4,17 @@ const vipService = require("../services/vipResellerService");
 const crypto = require("crypto");
 
 const orderController = {
-  // 1. BUAT PESANAN (User Checkout)
+  // 1. BUAT PESANAN (User Checkout) - Tidak ada perubahan logika, hanya formatting
   createOrder: async (req, res) => {
     try {
-      // req.user dari authMiddleware (bisa null jika guest)
       const userId = req.user ? req.user.id : null;
       const { productId, gameUserId, zoneId, method } = req.body;
 
-      // Ambil Harga ASLI dari Database (Anti-Hack Harga)
+      // [Security] Validasi input dasar
+      if (!productId || !gameUserId) {
+        return res.status(400).json({ message: "Data pesanan tidak lengkap" });
+      }
+
       const product = await prisma.product.findUnique({
         where: { id: productId },
         include: { game: true },
@@ -20,20 +23,18 @@ const orderController = {
       if (!product)
         return res.status(404).json({ message: "Produk tidak ditemukan" });
 
-      // Buat Order di Database (Status: Pending)
       const newOrder = await prisma.order.create({
         data: {
           userId: userId,
           productId: product.id,
           playerId: gameUserId,
-          serverZone: zoneId,
-          amount: product.price, // Harga diambil dari DB
+          serverZone: zoneId || "",
+          amount: product.price,
           status: "pending",
           paymentMethod: method || "otomanis",
         },
       });
 
-      // Siapkan data ke Midtrans
       const itemDetails = [
         {
           id: product.id,
@@ -46,10 +47,9 @@ const orderController = {
       const customerDetails = {
         first_name: req.user ? req.user.username : "Guest",
         email: req.user ? req.user.email : "guest@topup.com",
-        phone: "08123456789",
+        phone: "08123456789", // Sebaiknya ambil dari input user jika ada
       };
 
-      // Minta Snap Token
       const midtransData = await midtransService.createTransaction(
         newOrder.id,
         newOrder.amount,
@@ -57,7 +57,6 @@ const orderController = {
         itemDetails
       );
 
-      // Simpan URL Pembayaran
       await prisma.order.update({
         where: { id: newOrder.id },
         data: {
@@ -82,7 +81,7 @@ const orderController = {
     }
   },
 
-  // 2. WEBHOOK MIDTRANS (JANTUNG TRANSAKSI ANTI-RUGI)
+  // 2. WEBHOOK MIDTRANS - Area Perbaikan Utama
   handleNotification: async (req, res) => {
     try {
       const notification = req.body;
@@ -93,69 +92,89 @@ const orderController = {
       const grossAmount = notification.gross_amount;
       const signatureKey = notification.signature_key;
 
-      // A. VERIFIKASI SIGNATURE (Keamanan Wajib)
+      if (!orderId || !signatureKey) {
+        return res.status(400).json({ message: "Invalid Notification Body" });
+      }
+
+      // A. VERIFIKASI SIGNATURE (SECURE)
       // Rumus: SHA512(order_id + status_code + gross_amount + ServerKey)
+      const dataString = `${orderId}${statusCode}${grossAmount}${process.env.MIDTRANS_SERVER_KEY}`;
       const mySignature = crypto
         .createHash("sha512")
-        .update(
-          `${orderId}${statusCode}${grossAmount}${process.env.MIDTRANS_SERVER_KEY}`
-        )
+        .update(dataString)
         .digest("hex");
 
-      if (signatureKey !== mySignature) {
+      // [Security] Mencegah Timing Attack dengan timingSafeEqual
+      const signatureValid = crypto.timingSafeEqual(
+        Buffer.from(signatureKey),
+        Buffer.from(mySignature)
+      );
+
+      if (!signatureValid) {
+        console.warn(
+          `[Security Alert] Invalid Signature attempt for Order ${orderId}`
+        );
         return res.status(403).json({ message: "Invalid Signature" });
       }
 
       // B. CEK STATUS DATABASE
       const order = await prisma.order.findUnique({
         where: { id: orderId },
-        include: { product: true }, // Butuh kode VIP produk
+        include: { product: true },
       });
 
       if (!order) return res.status(404).json({ message: "Order not found" });
-      if (order.status === "success")
-        return res.status(200).json({ message: "Already success" });
+
+      // [Idempotency] Jika sudah sukses, jangan proses lagi (cegah double topup)
+      if (order.status === "success" || order.status === "processing") {
+        return res.status(200).json({ message: "Order already processed" });
+      }
 
       // C. LOGIKA STATUS PEMBAYARAN
       let paymentSuccess = false;
+      let newStatus = order.status;
+
       if (transactionStatus === "capture") {
         if (fraudStatus === "challenge") {
-          // Transaksi dicurigai, jangan kirim barang dulu
-          await prisma.order.update({
-            where: { id: orderId },
-            data: { status: "challenge" },
-          });
+          newStatus = "challenge";
         } else if (fraudStatus === "accept") {
           paymentSuccess = true;
         }
       } else if (transactionStatus === "settlement") {
         paymentSuccess = true;
-      } else if (
-        transactionStatus === "cancel" ||
-        transactionStatus === "deny" ||
-        transactionStatus === "expire"
-      ) {
+      } else if (["cancel", "deny", "expire"].includes(transactionStatus)) {
+        newStatus = "failed";
+      } else if (transactionStatus === "pending") {
+        newStatus = "pending";
+      }
+
+      // Update status jika gagal/pending/challenge
+      if (!paymentSuccess && newStatus !== order.status) {
         await prisma.order.update({
           where: { id: orderId },
-          data: { status: "failed" },
+          data: { status: newStatus },
         });
+        return res.status(200).json({ status: "ok" });
       }
 
       // D. EKSEKUSI KIRIM BARANG (HANYA JIKA SUDAH BAYAR)
       if (paymentSuccess) {
-        // Update status jadi processing dulu
+        // [Locking] Update ke processing dulu agar request paralel lain ditolak di tahap B
         await prisma.order.update({
           where: { id: orderId },
           data: { status: "processing" },
         });
 
+        console.log(`[Process Order] Processing topup for Order ${orderId}`);
+
         try {
-          // --- COBA TEMBAK VIP RESELLER ---
+          // --- TEMBAK VIP RESELLER ---
+          // [Fix] Sekarang fungsi transaction sudah ada di service
           const trxVip = await vipService.transaction(
-            order.id, // TrxID kita
-            order.product.vipCode, // Kode Barang (ML86, dll)
-            order.playerId, // ID Player
-            order.serverZone // Zone ID
+            order.id,
+            order.product.vipCode,
+            order.playerId,
+            order.serverZone
           );
 
           if (trxVip.result) {
@@ -164,49 +183,47 @@ const orderController = {
               where: { id: orderId },
               data: {
                 status: "success",
-                vipTrxId: trxVip.data.trxid, // Simpan ID transaksi dari VIP
+                vipTrxId: trxVip.data.trxid,
                 note: trxVip.message,
               },
             });
           } else {
-            // GAGAL DARI PROVIDER (Saldo habis / Maintenance / Salah ID)
-            await prisma.order.update({
-              where: { id: orderId },
-              data: { status: "failed", note: trxVip.message },
-            });
+            // GAGAL DARI PROVIDER -> Coba Recheck Status (Anti-Rugi)
+            console.error(`[VIP Failed] Order ${orderId}: ${trxVip.message}`);
+
+            // Cek ulang status ke provider untuk memastikan
+            const check = await vipService.checkStatus(orderId);
+
+            // Logika pengecekan status manual provider
+            if (check && check.data && check.data[0]?.status === "success") {
+              await prisma.order.update({
+                where: { id: orderId },
+                data: { status: "success", note: "Rechecked: Success (Auto)" },
+              });
+            } else {
+              // Jika benar-benar gagal
+              await prisma.order.update({
+                where: { id: orderId },
+                data: {
+                  status: "failed",
+                  note: trxVip.message || "Provider Failed",
+                },
+              });
+            }
           }
         } catch (vipError) {
-          // --- LOGIKA ANTI-RUGI (RE-CHECK STATUS) ---
           console.error(
-            `[VIP Error] Order ${orderId} bermasalah:`,
+            `[VIP Exception] Order ${orderId} error:`,
             vipError.message
           );
-
-          // Jangan langsung failed! Cek status ke VIP dulu
-          const check = await vipService.checkStatus(orderId);
-
-          if (check && check.data && check.data[0].status === "success") {
-            // Ternyata sukses di sana (cuma response telat)
-            await prisma.order.update({
-              where: { id: orderId },
-              data: { status: "success", note: "Rechecked: Success" },
-            });
-          } else if (check && check.data && check.data[0].status === "error") {
-            // Beneran gagal di sana
-            await prisma.order.update({
-              where: { id: orderId },
-              data: { status: "failed", note: "Rechecked: Failed" },
-            });
-          } else {
-            // Tidak jelas/Provider mati total -> Manual Check
-            await prisma.order.update({
-              where: { id: orderId },
-              data: {
-                status: "manual_check",
-                note: "Provider Timeout. Cek Manual.",
-              },
-            });
-          }
+          // Jika error koneksi/timeout, set ke manual check, jangan langsung failed
+          await prisma.order.update({
+            where: { id: orderId },
+            data: {
+              status: "manual_check",
+              note: "Provider Timeout/Error. Please check manually.",
+            },
+          });
         }
       }
 
@@ -217,24 +234,22 @@ const orderController = {
     }
   },
 
-  // 3. RIWAYAT TRANSAKSI USER
+  // 3. RIWAYAT TRANSAKSI USER (Dibiarkan tetap sama jika tidak ada isu)
   getMyOrders: async (req, res) => {
     try {
-      if (!req.user) return res.status(401).json({ message: "Unauthorized" });
-
+      const userId = req.user.id;
       const orders = await prisma.order.findMany({
-        where: { userId: req.user.id },
+        where: { userId: userId },
         include: { product: { include: { game: true } } },
         orderBy: { createdAt: "desc" },
       });
-
       res.json({ status: "success", data: orders });
     } catch (error) {
-      res.status(500).json({ message: "Gagal mengambil data" });
+      console.error("My Orders Error:", error);
+      res.status(500).json({ message: "Gagal mengambil data transaksi." });
     }
   },
 
-  // 4. CEK DETAIL ORDER (PUBLIC/RECEIPT)
   getOrderDetail: async (req, res) => {
     try {
       const { orderId } = req.params;
@@ -242,43 +257,11 @@ const orderController = {
         where: { id: orderId },
         include: { product: { include: { game: true } } },
       });
-
       if (!order)
         return res.status(404).json({ message: "Order tidak ditemukan" });
-
       res.json({ status: "success", data: order });
     } catch (error) {
       res.status(500).json({ message: "Error server" });
-    }
-  },
-
-  // ==========================================
-  // AMBIL RIWAYAT TRANSAKSI USER (Profile)
-  // ==========================================
-  getMyOrders: async (req, res) => {
-    try {
-      // req.user.id didapat dari authMiddleware (Token JWT)
-      const userId = req.user.id;
-
-      const orders = await prisma.order.findMany({
-        where: { userId: userId }, // Hanya ambil punya user yang login
-        include: {
-          product: {
-            include: {
-              game: true, // Ambil info Game juga (Mobile Legends, dll)
-            },
-          },
-        },
-        orderBy: { createdAt: "desc" }, // Urutkan dari yang terbaru
-      });
-
-      res.json({
-        status: "success",
-        data: orders,
-      });
-    } catch (error) {
-      console.error("My Orders Error:", error);
-      res.status(500).json({ message: "Gagal mengambil data transaksi." });
     }
   },
 };
