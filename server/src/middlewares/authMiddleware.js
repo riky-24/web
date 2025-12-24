@@ -1,57 +1,86 @@
 const jwt = require("jsonwebtoken");
 
-// [SECURITY CRITICAL]
-// Pastikan JWT_SECRET diambil dari environment variable.
-// Jika tidak ada, fallback "rahasia" HANYA boleh untuk development,
-// tapi sangat disarankan untuk memaksa error di production.
+// [SECURITY CONFIG]
 const JWT_SECRET = process.env.JWT_SECRET || "rahasia";
 
-if (!process.env.JWT_SECRET) {
-  console.warn(
-    "[SECURITY WARNING] JWT_SECRET tidak diset di .env. Menggunakan default 'rahasia' (Sangat Tidak Aman untuk Production!)"
-  );
+// Warning di log jika masih pakai default secret di production
+if (
+  process.env.JWT_SECRET === undefined &&
+  process.env.NODE_ENV === "production"
+) {
+  console.error("[FATAL] JWT_SECRET belum diset di environment variable!");
+  process.exit(1); // Matikan server karena tidak aman
 }
 
-// 1. SOFT AUTH (Bisa Guest / User)
-// Digunakan global agar req.user terisi jika ada token
-const authMiddleware = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    const token = authHeader.split(" ")[1];
-    try {
-      // Enforce algorithm untuk keamanan ekstra
-      const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ["HS256"] });
-      req.user = decoded;
-    } catch (error) {
-      // Token invalid/expired di soft auth tidak boleh bikin error,
-      // cukup anggap user sebagai guest.
-      // console.error("Soft Auth Token Warning:", error.message);
-    }
+// --- HELPER: Verifikasi Token ---
+const verifyToken = (token) => {
+  try {
+    return jwt.verify(token, JWT_SECRET, { algorithms: ["HS256"] });
+  } catch (err) {
+    return null;
   }
-  next();
 };
 
-// 2. STRICT AUTH (Wajib Login)
-// Digunakan khusus untuk route yang butuh data user
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  const token = authHeader && authHeader.split(" ")[1];
+const authMiddleware = {
+  // 1. OPTIONAL AUTH (Soft Auth)
+  // Cek token: Jika valid -> set req.user. Jika tidak -> anggap Guest (lanjut).
+  // Cocok untuk: Halaman Home (bisa lihat harga user vs reseller)
+  optionalAuth: (req, res, next) => {
+    const authHeader = req.headers.authorization;
 
-  if (!token) {
-    return res.status(401).json({ message: "Akses ditolak. Silakan login." });
-  }
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.split(" ")[1];
+      const decoded = verifyToken(token);
+      if (decoded) {
+        req.user = decoded;
+      }
+    }
+    next();
+  },
 
-  jwt.verify(token, JWT_SECRET, { algorithms: ["HS256"] }, (err, user) => {
-    if (err) {
+  // 2. REQUIRED AUTH (Strict Auth)
+  // Wajib punya token valid. Jika tidak -> Error 401/403.
+  // Cocok untuk: Halaman Order, Profile, History
+  requireAuth: (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.split(" ")[1];
+
+    if (!token) {
+      return res.status(401).json({ message: "Akses ditolak. Silakan login." });
+    }
+
+    const decoded = verifyToken(token);
+    if (!decoded) {
       return res
         .status(403)
         .json({ message: "Token tidak valid atau kedaluwarsa." });
     }
-    req.user = user;
+
+    req.user = decoded;
     next();
-  });
+  },
+
+  // 3. ROLE GUARD (Admin/Reseller Only)
+  // Middleware dinamis untuk membatasi akses berdasarkan role
+  // Cara pakai: requireRole("ADMIN", "RESELLER")
+  requireRole: (...allowedRoles) => {
+    return (req, res, next) => {
+      // Pastikan sudah lewat requireAuth dulu (req.user harus ada)
+      if (!req.user) {
+        return res
+          .status(401)
+          .json({ message: "Silakan login terlebih dahulu." });
+      }
+
+      if (!allowedRoles.includes(req.user.role)) {
+        return res
+          .status(403)
+          .json({ message: "Anda tidak memiliki izin untuk akses ini." });
+      }
+
+      next();
+    };
+  },
 };
 
-// Export sebagai Object
-module.exports = { authMiddleware, authenticateToken };
+module.exports = authMiddleware;

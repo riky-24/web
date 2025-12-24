@@ -2,12 +2,14 @@ const express = require("express");
 const router = express.Router();
 const gameController = require("../controllers/gameController");
 
-// GET /api/games -> List semua game
-router.get("/", gameController.getAllGames);
+// Import nama baru
+const { optionalAuth } = require("../middlewares/authMiddleware");
 
-// GET /api/games/:slug -> Detail game + produk (misal: /api/games/mobile-legends)
-router.get("/:slug", gameController.getGameDetail);
-// Rute Baru: POST /api/games/check-id
-router.post("/check-id", gameController.checkAccount);
+// Gunakan optionalAuth agar user login bisa dapat harga khusus (jika ada fitur itu)
+// GET /api/games
+router.get("/", optionalAuth, gameController.getGames);
+
+// GET /api/games/:slug
+router.get("/:slug", optionalAuth, gameController.getGameDetail);
 
 module.exports = router;
