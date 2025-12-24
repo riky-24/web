@@ -1,28 +1,34 @@
 const midtransClient = require("midtrans-client");
 require("dotenv").config();
 
-// Tentukan mode Production/Sandbox
 const isProduction = process.env.MIDTRANS_IS_PRODUCTION === "true";
+const serverKey = process.env.MIDTRANS_SERVER_KEY;
+const clientKey = process.env.MIDTRANS_CLIENT_KEY;
 
-// Validasi Key (Beri peringatan saja, jangan matikan server, siapa tau cuma mau cek harga)
-if (!process.env.MIDTRANS_SERVER_KEY || !process.env.MIDTRANS_CLIENT_KEY) {
+// Validasi Key (Penting agar tidak error diam-diam)
+if (!serverKey || !clientKey) {
   console.warn(
-    "[CONFIG WARNING] MIDTRANS_SERVER_KEY atau CLIENT_KEY belum diset! Fitur pembayaran mungkin error."
+    "[CONFIG WARNING] MIDTRANS_SERVER_KEY atau CLIENT_KEY belum diset! Transaksi akan gagal."
   );
 }
 
-// 1. Instance Snap (Untuk membuat transaksi/token)
+// 1. Instance Snap (Untuk membuat token pembayaran)
 const snap = new midtransClient.Snap({
   isProduction: isProduction,
-  serverKey: process.env.MIDTRANS_SERVER_KEY,
-  clientKey: process.env.MIDTRANS_CLIENT_KEY,
+  serverKey: serverKey,
+  clientKey: clientKey,
 });
 
 // 2. Instance Core API (Untuk cek status transaksi, cancel, refund)
 const coreApi = new midtransClient.CoreApi({
   isProduction: isProduction,
-  serverKey: process.env.MIDTRANS_SERVER_KEY,
-  clientKey: process.env.MIDTRANS_CLIENT_KEY,
+  serverKey: serverKey,
+  clientKey: clientKey,
 });
 
-module.exports = { snap, coreApi, isProduction };
+module.exports = {
+  snap,
+  coreApi,
+  serverKey, // [PENTING] Diexport untuk validasi Signature di orderService
+  isProduction,
+};

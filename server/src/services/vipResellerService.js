@@ -1,10 +1,9 @@
 const axios = require("axios");
-const crypto = require("crypto");
+// [CLEANUP] Hapus 'crypto' karena sudah pakai helper
 const config = require("../config/vipreseller");
 const { createMD5 } = require("../utils/cryptoHelper");
 
 // Helper: Membuat Signature MD5 (API ID + API KEY)
-// [Security] Menggunakan fungsi crypto bawaan, bukan fungsi global md5() yang tidak terdefinisi
 const generateSignature = () => {
   if (!config.apiId || !config.apiKey) {
     throw new Error(
@@ -12,10 +11,11 @@ const generateSignature = () => {
     );
   }
   const data = config.apiId + config.apiKey;
-  return createMD5(data); // Pakai Utils
+  return createMD5(data); // Menggunakan Utils yang aman
 };
 
 const vipResellerService = {
+  // 1. CEK PROFIL (Saldo & Status)
   getProfile: async () => {
     try {
       const signature = generateSignature();
@@ -36,6 +36,7 @@ const vipResellerService = {
     }
   },
 
+  // 2. CEK NICKNAME GAME (Validasi ID Player)
   checkGameId: async (gameCode, userId, zoneId = "") => {
     try {
       const signature = generateSignature();
@@ -64,19 +65,19 @@ const vipResellerService = {
     }
   },
 
-  // [Fix Critical] Fungsi ini sebelumnya TIDAK ADA, menyebabkan server crash saat user bayar.
+  // 3. TRANSAKSI (Order Item)
   transaction: async (trxId, serviceCode, target, zone = "") => {
     try {
       const signature = generateSignature();
 
-      // Menggunakan URLSearchParams agar konsisten dengan endpoint lain
       const payload = new URLSearchParams();
       payload.append("key", config.apiKey);
       payload.append("sign", signature);
-      payload.append("type", "order"); // Tipe request order
-      payload.append("service", serviceCode); // Kode layanan (misal: ML86)
-      payload.append("data_no", `${target}${zone ? zone : ""}`); // Nomor tujuan gabungan
-      payload.append("trx_id", trxId); // ID referensi unik dari kita
+      payload.append("type", "order");
+      payload.append("service", serviceCode);
+      // Format data_no: ID gabung Zone (jika ada)
+      payload.append("data_no", `${target}${zone ? zone : ""}`);
+      payload.append("trx_id", trxId);
 
       console.log(`[VIP TRX] Sending Order: ${trxId} - Code: ${serviceCode}`);
 
@@ -94,18 +95,19 @@ const vipResellerService = {
         "[VIP Transaction Error]",
         error?.response?.data || error.message
       );
-      // Return object error agar tidak throw dan memutus flow controller
+      // Return object error agar logic di Service/Controller pemanggil bisa handle gracefully
       return {
         result: false,
-        message: error?.response?.data?.message || "Connection Error",
+        message:
+          error?.response?.data?.message || "Connection Error to Provider",
       };
     }
   },
 
-  // [Fix Bug] Memperbaiki referensi error 'md5 is not defined' dan penggunaan process.env langsung
+  // 4. CEK STATUS TRANSAKSI
   checkStatus: async (trxId) => {
     try {
-      const signature = generateSignature(); // Gunakan helper yang sudah benar
+      const signature = generateSignature();
 
       const payload = new URLSearchParams();
       payload.append("key", config.apiKey);
