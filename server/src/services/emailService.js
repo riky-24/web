@@ -1,13 +1,15 @@
 const nodemailer = require("nodemailer");
+const appConfig = require("../config/app"); // Import Config Pusat
 
 // 1. Konfigurasi Transporter (Tukang Pos)
+// Menggunakan data dari appConfig yang sudah divalidasi di awal (Fail Fast)
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: process.env.SMTP_PORT,
+  host: appConfig.mail.host,
+  port: appConfig.mail.port,
   secure: true, // true untuk port 465, false untuk port 587
   auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
+    user: appConfig.mail.user,
+    pass: appConfig.mail.pass,
   },
 });
 
@@ -25,10 +27,12 @@ const emailStyle = `
 const sendVerificationEmail = async (toEmail, token) => {
   // [SECURITY] Encode token untuk keamanan URL
   const safeToken = encodeURIComponent(token);
-  const verificationLink = `${process.env.CLIENT_URL}/verify-email?token=${safeToken}`;
+
+  // Gunakan clientUrl dari Config Pusat (Konsisten)
+  const verificationLink = `${appConfig.clientUrl}/verify-email?token=${safeToken}`;
 
   const mailOptions = {
-    from: `"Game Topup Security" <${process.env.SMTP_USER}>`,
+    from: `"Game Topup Security" <${appConfig.mail.user}>`,
     to: toEmail,
     subject: "Verifikasi Akun Game Topup Anda",
     html: `
@@ -64,10 +68,12 @@ const sendVerificationEmail = async (toEmail, token) => {
 const sendResetPasswordEmail = async (toEmail, token) => {
   // [SECURITY] Encode token
   const safeToken = encodeURIComponent(token);
-  const resetLink = `${process.env.CLIENT_URL}/reset-password?token=${safeToken}`;
+
+  // Gunakan clientUrl dari Config Pusat
+  const resetLink = `${appConfig.clientUrl}/reset-password?token=${safeToken}`;
 
   const mailOptions = {
-    from: `"Game Topup Security" <${process.env.SMTP_USER}>`,
+    from: `"Game Topup Security" <${appConfig.mail.user}>`,
     to: toEmail,
     subject: "Reset Password Akun Anda",
     html: `
