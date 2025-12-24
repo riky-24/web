@@ -1,6 +1,7 @@
 const gameModel = require("../models/gameModel"); // Import Model
 const vipService = require("./vipResellerService");
 const adminService = require("./adminService");
+const { ROLES } = require("../config/constants");
 
 const gameService = {
   /**
@@ -24,9 +25,9 @@ const gameService = {
 
     let margin = config.marginUser; // Default ambil dari DB
 
-    if (role === "RESELLER") {
+    if (role === ROLES.RESELLER) {
       margin = config.marginReseller;
-    } else if (role === "VIP") {
+    } else if (role === ROLES.VIP) {
       margin = config.marginVip;
     }
 

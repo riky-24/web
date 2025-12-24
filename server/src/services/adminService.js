@@ -1,6 +1,7 @@
 const { prisma } = require("../config/database");
 const vipService = require("./vipResellerService");
 const logModel = require("../models/logModel");
+const { DEFAULTS } = require("../config/constants");
 
 const adminService = {
   /**
@@ -93,10 +94,11 @@ const adminService = {
     // Return default kalau belum diset
     return (
       config || {
-        marginUser: 0.05,
-        marginReseller: 0.02,
-        marginVip: 0.01,
-        isMaintenance: false,
+        marginUser: DEFAULTS.MARGIN.USER,
+        marginReseller: DEFAULTS.MARGIN.RESELLER,
+        marginVip: DEFAULTS.MARGIN.VIP,
+        serviceFee: DEFAULTS.SERVICE_FEE,
+        isMaintenance: DEFAULTS.IS_MAINTENANCE,
       }
     );
   },
