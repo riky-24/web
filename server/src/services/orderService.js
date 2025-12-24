@@ -1,7 +1,8 @@
 const { prisma } = require("../config/database");
 const midtransService = require("./midtransService");
 const vipService = require("./vipResellerService");
-const crypto = require("crypto");
+const { createSHA512, compareSafe } = require("../utils/cryptoHelper");
+const { generateTrxId } = require("../utils/stringHelper");
 
 const orderService = {
   /**
@@ -23,6 +24,7 @@ const orderService = {
     // 2. Hitung Harga (Bisa disamakan logicnya dengan gameService jika perlu dynamic price saat checkout)
     // Untuk saat ini kita pakai harga database dulu, atau panggil logic margin lagi.
     const finalPrice = product.price; // TODO: Implementasikan ulang logic margin jika perlu konsistensi
+    const trxId = generateTrxId();
 
     // 3. Buat Record Order di Database (Status: Pending)
     const newOrder = await prisma.order.create({
@@ -34,6 +36,7 @@ const orderService = {
         amount: finalPrice,
         status: "pending",
         paymentMethod: method || "qris", // Default method
+        trxId: trxId,
       },
     });
 

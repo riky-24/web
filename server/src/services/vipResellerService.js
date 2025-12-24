@@ -1,6 +1,7 @@
 const axios = require("axios");
 const crypto = require("crypto");
 const config = require("../config/vipreseller");
+const { createMD5 } = require("../utils/cryptoHelper");
 
 // Helper: Membuat Signature MD5 (API ID + API KEY)
 // [Security] Menggunakan fungsi crypto bawaan, bukan fungsi global md5() yang tidak terdefinisi
@@ -10,8 +11,8 @@ const generateSignature = () => {
       "[VIP CONFIG ERROR] VIP_ID atau VIP_KEY belum diset di .env!"
     );
   }
-  const data = String(config.apiId) + String(config.apiKey);
-  return crypto.createHash("md5").update(data).digest("hex");
+  const data = config.apiId + config.apiKey;
+  return createMD5(data); // Pakai Utils
 };
 
 const vipResellerService = {
