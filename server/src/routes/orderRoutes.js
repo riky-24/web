@@ -20,12 +20,12 @@ router.get("/", requireAuth, orderController.getMyOrders);
 router.get("/:orderId", requireAuth, orderController.getOrderDetail);
 
 // ==========================================
-// PUBLIC ROUTES (Webhook)
+// PUBLIC ROUTES (Webhook Midtrans)
 // ==========================================
 
 // POST /api/orders/notification
-// Webhook dari Midtrans (Jangan dikasih Auth Middleware! Midtrans gak punya token login kita)
-// Keamanan sudah ditangani di dalam controller via Signature Key check.
+// Webhook dari Midtrans (Jangan dikasih Auth! Midtrans gak punya token login kita)
+// Keamanan dijaga oleh Signature Key check di dalam Controller/Service.
 router.post("/notification", orderController.handleNotification);
 
 module.exports = router;

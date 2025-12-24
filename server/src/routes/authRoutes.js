@@ -24,10 +24,10 @@ router.post(
 // Login
 router.post("/login", authController.login);
 
-// Verifikasi Email
+// Verifikasi Email (Link dari email)
 router.post("/verify-email", authController.verifyEmail);
 
-// Lupa Password
+// Lupa Password (Request Link)
 router.post("/forgot-password", authController.forgotPassword);
 
 // Reset Password: Validasi Password Baru -> Proses Controller

@@ -8,16 +8,16 @@ const { optionalAuth } = require("../middlewares/authMiddleware");
 // ==========================================
 
 // GET /api/games
-// Mengambil semua list game (Public)
+// Mengambil semua list game
 router.get("/", gameController.getAllGames);
 
 // GET /api/games/:slug
-// Mengambil detail game & produk
+// Mengambil detail game
 // PENTING: Pakai 'optionalAuth' agar Controller tau ini Guest atau Member (untuk harga dinamis)
 router.get("/:slug", optionalAuth, gameController.getGameDetail);
 
 // POST /api/games/check-id
-// Cek Validitas ID Player ke Provider (Public)
+// Cek Validitas ID Player ke Provider
 router.post("/check-id", gameController.checkAccount);
 
 module.exports = router;
