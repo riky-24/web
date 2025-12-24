@@ -2,15 +2,39 @@ const express = require("express");
 const router = express.Router();
 const authController = require("../controllers/authController");
 
-// POST /api/auth/register
-router.post("/register", authController.register);
+// Import Middleware Validasi & Security
+const {
+  validateRegister,
+  validateResetPassword,
+} = require("../middlewares/validationMiddleware");
+const { checkEmailDomain } = require("../middlewares/emailSecurityMiddleware");
 
-// POST /api/auth/login
+// ==========================================
+// AUTH ROUTES
+// ==========================================
+
+// Register: Validasi Input -> Cek DNS Email -> Proses Controller
+router.post(
+  "/register",
+  validateRegister,
+  checkEmailDomain,
+  authController.register
+);
+
+// Login
 router.post("/login", authController.login);
 
-// --- RUTE BARU ---
+// Verifikasi Email
 router.post("/verify-email", authController.verifyEmail);
+
+// Lupa Password
 router.post("/forgot-password", authController.forgotPassword);
-router.post("/reset-password", authController.resetPassword);
+
+// Reset Password: Validasi Password Baru -> Proses Controller
+router.post(
+  "/reset-password",
+  validateResetPassword,
+  authController.resetPassword
+);
 
 module.exports = router;

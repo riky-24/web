@@ -1,15 +1,23 @@
 const express = require("express");
 const router = express.Router();
 const gameController = require("../controllers/gameController");
-
-// Import nama baru
 const { optionalAuth } = require("../middlewares/authMiddleware");
 
-// Gunakan optionalAuth agar user login bisa dapat harga khusus (jika ada fitur itu)
+// ==========================================
+// PUBLIC ROUTES (Dengan Optional Auth)
+// ==========================================
+
 // GET /api/games
-router.get("/", optionalAuth, gameController.getGames);
+// Mengambil semua list game (Public)
+router.get("/", gameController.getAllGames);
 
 // GET /api/games/:slug
+// Mengambil detail game & produk
+// PENTING: Pakai 'optionalAuth' agar Controller tau ini Guest atau Member (untuk harga dinamis)
 router.get("/:slug", optionalAuth, gameController.getGameDetail);
+
+// POST /api/games/check-id
+// Cek Validitas ID Player ke Provider (Public)
+router.post("/check-id", gameController.checkAccount);
 
 module.exports = router;
