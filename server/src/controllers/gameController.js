@@ -1,95 +1,71 @@
-const { prisma } = require("../config/database");
 const vipService = require("../services/vipResellerService");
 
 const gameController = {
-  // 1. Ambil Semua List Game
-  getAllGames: async (req, res) => {
+  // ==========================================
+  // 1. GET ALL GAMES (List Game)
+  // ==========================================
+  getGames: async (req, res) => {
     try {
-      const games = await prisma.game.findMany({
-        where: { isActive: true },
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-          image: true,
-          category: true,
-        },
-      });
+      // Ambil daftar game dari cache atau provider
+      // (Contoh logic sederhana)
+      const games = await vipService.getGameList();
+
+      // Di sini kita bisa filter game yang sedang gangguan, dll.
       res.json({ status: "success", data: games });
     } catch (error) {
-      res
-        .status(500)
-        .json({ status: "error", message: "Gagal mengambil data game" });
+      console.error("Get Games Error:", error);
+      res.status(500).json({ message: "Gagal memuat daftar game." });
     }
   },
 
-  // 2. Ambil Detail Game + Produk
+  // ==========================================
+  // 2. GET GAME DETAIL (Penting: Pricing Logic)
+  // ==========================================
   getGameDetail: async (req, res) => {
-    const { slug } = req.params;
     try {
-      const game = await prisma.game.findUnique({
-        where: { slug },
-        include: {
-          products: {
-            where: { isActive: true },
-            orderBy: { price: "asc" },
-          },
-        },
+      const { slug } = req.params; // misal: 'mobile-legends'
+
+      // 1. Ambil Data Produk dari Provider
+      const gameData = await vipService.getGameDetail(slug);
+
+      if (!gameData) {
+        return res.status(404).json({ message: "Game tidak ditemukan." });
+      }
+
+      // 2. LOGIKA HARGA DINAMIS (Impact dari AuthMiddleware)
+      // Cek apakah user sedang login dan punya role khusus
+      const userRole = req.user ? req.user.role : "GUEST";
+
+      const productsWithPrice = gameData.products.map((item) => {
+        let finalPrice = item.price;
+
+        // Aturan Margin
+        if (userRole === "RESELLER") {
+          finalPrice = item.price * 1.02; // Untung tipis 2% buat Reseller
+        } else if (userRole === "VIP") {
+          finalPrice = item.price * 1.03; // Untung 3% buat VIP
+        } else {
+          finalPrice = item.price * 1.05; // Untung 5% buat User Biasa / Guest
+        }
+
+        return {
+          ...item,
+          price: Math.ceil(finalPrice), // Pembulatan harga
+          originalPrice: undefined, // HAPUS harga modal agar tidak bocor ke publik!
+        };
       });
 
-      if (!game)
-        return res
-          .status(404)
-          .json({ status: "error", message: "Game tidak ditemukan" });
-
-      res.json({ status: "success", data: game });
-    } catch (error) {
-      res
-        .status(500)
-        .json({ status: "error", message: "Gagal mengambil detail game" });
-    }
-  },
-
-  // 3. FITUR BARU: Cek ID Player (Validasi Akun)
-  checkAccount: async (req, res) => {
-    try {
-      const { slug, userId, zoneId } = req.body;
-
-      // Validasi Input Dasar
-      if (!slug || !userId) {
-        return res
-          .status(400)
-          .json({
-            status: "error",
-            message: "Slug Game dan User ID wajib diisi",
-          });
-      }
-
-      // Panggil Service VIP Reseller
-      // slug di DB kita (misal 'mobile-legends') sama dengan kode di VIP Reseller
-      const result = await vipService.checkGameId(slug, userId, zoneId);
-
-      // Cek respon dari VIP Reseller
-      if (result.result === false) {
-        return res.status(400).json({
-          status: "error",
-          message: result.message || "ID Player tidak ditemukan",
-        });
-      }
-
-      // Sukses
       res.json({
         status: "success",
         data: {
-          username: result.data.userName || result.data, // Sesuaikan dengan response real VIP
-          originalResponse: result, // Debugging
+          name: gameData.name,
+          slug: gameData.slug,
+          products: productsWithPrice,
         },
       });
     } catch (error) {
-      console.error("[CheckAccount Error]", error.message);
-      res
-        .status(500)
-        .json({ status: "error", message: "Gagal mengecek ID Player" });
+      console.error("Game Detail Error:", error);
+      res.status(500).json({ message: "Gagal memuat detail game." });
     }
   },
 };

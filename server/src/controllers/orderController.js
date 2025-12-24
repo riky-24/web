@@ -1,267 +1,155 @@
 const { prisma } = require("../config/database");
-const midtransService = require("../services/midtransService");
 const vipService = require("../services/vipResellerService");
-const crypto = require("crypto");
 
 const orderController = {
-  // 1. BUAT PESANAN (User Checkout) - Tidak ada perubahan logika, hanya formatting
+  // ==========================================
+  // 1. BUAT ORDER BARU
+  // ==========================================
   createOrder: async (req, res) => {
     try {
-      const userId = req.user ? req.user.id : null;
-      const { productId, gameUserId, zoneId, method } = req.body;
+      // [CLEANUP] Tidak perlu cek if (!req.user) lagi
+      // karena sudah dijaga oleh middleware 'requireAuth' di routes.
 
-      // [Security] Validasi input dasar
-      if (!productId || !gameUserId) {
-        return res.status(400).json({ message: "Data pesanan tidak lengkap" });
+      const userId = req.user.id; // Ambil ID dari token
+      const { serviceCode, target, serverId } = req.body;
+
+      if (!serviceCode || !target) {
+        return res.status(400).json({ message: "Data pesanan tidak lengkap." });
       }
 
-      const product = await prisma.product.findUnique({
-        where: { id: productId },
-        include: { game: true },
-      });
+      // 1. Cek User di DB (untuk memastikan saldo & validitas)
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      if (!user)
+        return res.status(404).json({ message: "User tidak ditemukan." });
 
+      // 2. Cek Layanan & Harga dari VIP Reseller (atau Cache DB)
+      // (Asumsi: Anda punya fungsi untuk cek harga, contoh sederhana:)
+      const product = await vipService.checkPrice(serviceCode);
       if (!product)
-        return res.status(404).json({ message: "Produk tidak ditemukan" });
+        return res.status(400).json({ message: "Layanan tidak tersedia." });
 
-      const newOrder = await prisma.order.create({
-        data: {
-          userId: userId,
-          productId: product.id,
-          playerId: gameUserId,
-          serverZone: zoneId || "",
-          amount: product.price,
-          status: "pending",
-          paymentMethod: method || "otomanis",
-        },
-      });
+      // Logic Margin Profit (Bisa dipisah ke helper)
+      const margin = 1.05; // Contoh untung 5%
+      const sellingPrice = Math.ceil(product.price * margin);
 
-      const itemDetails = [
-        {
-          id: product.id,
-          price: product.price,
-          quantity: 1,
-          name: `${product.game.name} - ${product.name}`.substring(0, 50),
-        },
-      ];
-
-      const customerDetails = {
-        first_name: req.user ? req.user.username : "Guest",
-        email: req.user ? req.user.email : "guest@topup.com",
-        phone: "08123456789", // Sebaiknya ambil dari input user jika ada
-      };
-
-      const midtransData = await midtransService.createTransaction(
-        newOrder.id,
-        newOrder.amount,
-        customerDetails,
-        itemDetails
-      );
-
-      await prisma.order.update({
-        where: { id: newOrder.id },
-        data: {
-          paymentUrl: midtransData.redirect_url,
-          midtransTrxId: midtransData.token,
-        },
-      });
-
-      res.json({
-        status: "success",
-        data: {
-          orderId: newOrder.id,
-          snapToken: midtransData.token,
-          paymentUrl: midtransData.redirect_url,
-        },
-      });
-    } catch (error) {
-      console.error("[Create Order Error]", error);
-      res
-        .status(500)
-        .json({ status: "error", message: "Gagal membuat pesanan" });
-    }
-  },
-
-  // 2. WEBHOOK MIDTRANS - Area Perbaikan Utama
-  handleNotification: async (req, res) => {
-    try {
-      const notification = req.body;
-      const orderId = notification.order_id;
-      const transactionStatus = notification.transaction_status;
-      const fraudStatus = notification.fraud_status;
-      const statusCode = notification.status_code;
-      const grossAmount = notification.gross_amount;
-      const signatureKey = notification.signature_key;
-
-      if (!orderId || !signatureKey) {
-        return res.status(400).json({ message: "Invalid Notification Body" });
+      // 3. Cek Saldo User
+      if (user.balance < sellingPrice) {
+        return res.status(400).json({ message: "Saldo tidak mencukupi." });
       }
 
-      // A. VERIFIKASI SIGNATURE (SECURE)
-      // Rumus: SHA512(order_id + status_code + gross_amount + ServerKey)
-      const dataString = `${orderId}${statusCode}${grossAmount}${process.env.MIDTRANS_SERVER_KEY}`;
-      const mySignature = crypto
-        .createHash("sha512")
-        .update(dataString)
-        .digest("hex");
-
-      // [Security] Mencegah Timing Attack dengan timingSafeEqual
-      const signatureValid = crypto.timingSafeEqual(
-        Buffer.from(signatureKey),
-        Buffer.from(mySignature)
-      );
-
-      if (!signatureValid) {
-        console.warn(
-          `[Security Alert] Invalid Signature attempt for Order ${orderId}`
-        );
-        return res.status(403).json({ message: "Invalid Signature" });
-      }
-
-      // B. CEK STATUS DATABASE
-      const order = await prisma.order.findUnique({
-        where: { id: orderId },
-        include: { product: true },
-      });
-
-      if (!order) return res.status(404).json({ message: "Order not found" });
-
-      // [Idempotency] Jika sudah sukses, jangan proses lagi (cegah double topup)
-      if (order.status === "success" || order.status === "processing") {
-        return res.status(200).json({ message: "Order already processed" });
-      }
-
-      // C. LOGIKA STATUS PEMBAYARAN
-      let paymentSuccess = false;
-      let newStatus = order.status;
-
-      if (transactionStatus === "capture") {
-        if (fraudStatus === "challenge") {
-          newStatus = "challenge";
-        } else if (fraudStatus === "accept") {
-          paymentSuccess = true;
-        }
-      } else if (transactionStatus === "settlement") {
-        paymentSuccess = true;
-      } else if (["cancel", "deny", "expire"].includes(transactionStatus)) {
-        newStatus = "failed";
-      } else if (transactionStatus === "pending") {
-        newStatus = "pending";
-      }
-
-      // Update status jika gagal/pending/challenge
-      if (!paymentSuccess && newStatus !== order.status) {
-        await prisma.order.update({
-          where: { id: orderId },
-          data: { status: newStatus },
-        });
-        return res.status(200).json({ status: "ok" });
-      }
-
-      // D. EKSEKUSI KIRIM BARANG (HANYA JIKA SUDAH BAYAR)
-      if (paymentSuccess) {
-        // [Locking] Update ke processing dulu agar request paralel lain ditolak di tahap B
-        await prisma.order.update({
-          where: { id: orderId },
-          data: { status: "processing" },
+      // 4. Kurangi Saldo (Gunakan Transaction agar aman!)
+      // Prisma Transaction: Pastikan saldo terpotong DAN order tercatat, atau tidak sama sekali.
+      const newOrder = await prisma.$transaction(async (tx) => {
+        // A. Potong Saldo
+        await tx.user.update({
+          where: { id: userId },
+          data: { balance: { decrement: sellingPrice } },
         });
 
-        console.log(`[Process Order] Processing topup for Order ${orderId}`);
+        // B. Buat Record Order Lokal
+        const order = await tx.order.create({
+          data: {
+            userId: userId,
+            trxId: `TRX-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            serviceCode: serviceCode,
+            target: target,
+            serverId: serverId || null,
+            price: sellingPrice,
+            status: "PROCESSING", // Status awal
+            providerOrderId: null, // Nanti diisi setelah tembak VIP
+          },
+        });
 
-        try {
-          // --- TEMBAK VIP RESELLER ---
-          // [Fix] Sekarang fungsi transaction sudah ada di service
-          const trxVip = await vipService.transaction(
-            order.id,
-            order.product.vipCode,
-            order.playerId,
-            order.serverZone
-          );
+        return order;
+      });
 
-          if (trxVip.result) {
-            // SUKSES DARI PROVIDER
-            await prisma.order.update({
-              where: { id: orderId },
-              data: {
-                status: "success",
-                vipTrxId: trxVip.data.trxid,
-                note: trxVip.message,
-              },
-            });
-          } else {
-            // GAGAL DARI PROVIDER -> Coba Recheck Status (Anti-Rugi)
-            console.error(`[VIP Failed] Order ${orderId}: ${trxVip.message}`);
+      // 5. Tembak ke Provider (VIP Reseller)
+      // Dilakukan di luar transaksi DB agar tidak menahan koneksi database lama-lama
+      const providerResponse = await vipService.placeOrder(
+        serviceCode,
+        target,
+        serverId
+      );
 
-            // Cek ulang status ke provider untuk memastikan
-            const check = await vipService.checkStatus(orderId);
+      // 6. Update Status Order berdasarkan respon Provider
+      if (providerResponse.status === "success") {
+        await prisma.order.update({
+          where: { id: newOrder.id },
+          data: {
+            status: "PENDING", // Atau 'SUCCESS' tergantung respon VIP
+            providerOrderId: providerResponse.trxid,
+          },
+        });
 
-            // Logika pengecekan status manual provider
-            if (check && check.data && check.data[0]?.status === "success") {
-              await prisma.order.update({
-                where: { id: orderId },
-                data: { status: "success", note: "Rechecked: Success (Auto)" },
-              });
-            } else {
-              // Jika benar-benar gagal
-              await prisma.order.update({
-                where: { id: orderId },
-                data: {
-                  status: "failed",
-                  note: trxVip.message || "Provider Failed",
-                },
-              });
-            }
-          }
-        } catch (vipError) {
-          console.error(
-            `[VIP Exception] Order ${orderId} error:`,
-            vipError.message
-          );
-          // Jika error koneksi/timeout, set ke manual check, jangan langsung failed
-          await prisma.order.update({
-            where: { id: orderId },
-            data: {
-              status: "manual_check",
-              note: "Provider Timeout/Error. Please check manually.",
-            },
+        res.status(201).json({
+          status: "success",
+          message: "Pesanan berhasil diproses!",
+          data: newOrder,
+        });
+      } else {
+        // [REFUND] Jika provider gagal, kembalikan saldo user
+        await prisma.$transaction([
+          prisma.user.update({
+            where: { id: userId },
+            data: { balance: { increment: sellingPrice } },
+          }),
+          prisma.order.update({
+            where: { id: newOrder.id },
+            data: { status: "FAILED", note: "Provider Error" },
+          }),
+        ]);
+
+        res
+          .status(500)
+          .json({
+            message: "Gagal memproses ke provider. Saldo dikembalikan.",
           });
-        }
       }
-
-      res.status(200).json({ status: "ok" });
     } catch (error) {
-      console.error("[Webhook Error]", error);
-      res.status(500).json({ message: "Internal Server Error" });
+      console.error("Order Error:", error);
+      res.status(500).json({ message: "Terjadi kesalahan server saat order." });
     }
   },
 
-  // 3. RIWAYAT TRANSAKSI USER (Dibiarkan tetap sama jika tidak ada isu)
+  // ==========================================
+  // 2. RIWAYAT ORDER
+  // ==========================================
   getMyOrders: async (req, res) => {
     try {
-      const userId = req.user.id;
       const orders = await prisma.order.findMany({
-        where: { userId: userId },
-        include: { product: { include: { game: true } } },
+        where: { userId: req.user.id },
         orderBy: { createdAt: "desc" },
+        take: 50, // Limit 50 transaksi terakhir biar ringan
       });
+
       res.json({ status: "success", data: orders });
     } catch (error) {
-      console.error("My Orders Error:", error);
-      res.status(500).json({ message: "Gagal mengambil data transaksi." });
+      console.error("Get Orders Error:", error);
+      res.status(500).json({ message: "Gagal mengambil riwayat order." });
     }
   },
 
+  // ==========================================
+  // 3. DETAIL ORDER
+  // ==========================================
   getOrderDetail: async (req, res) => {
     try {
-      const { orderId } = req.params;
-      const order = await prisma.order.findUnique({
-        where: { id: orderId },
-        include: { product: { include: { game: true } } },
+      const { trxId } = req.params;
+
+      const order = await prisma.order.findFirst({
+        where: {
+          trxId: trxId,
+          userId: req.user.id, // Security: Pastikan hanya pemilik yang bisa lihat
+        },
       });
+
       if (!order)
-        return res.status(404).json({ message: "Order tidak ditemukan" });
+        return res.status(404).json({ message: "Transaksi tidak ditemukan." });
+
       res.json({ status: "success", data: order });
     } catch (error) {
-      res.status(500).json({ message: "Error server" });
+      console.error("Order Detail Error:", error);
+      res.status(500).json({ message: "Gagal mengambil detail order." });
     }
   },
 };
