@@ -1,5 +1,6 @@
 const gameModel = require("../models/gameModel"); // Import Model
 const vipService = require("./vipResellerService");
+const adminService = require("./adminService");
 
 const gameService = {
   /**
@@ -15,30 +16,31 @@ const gameService = {
    * [LOGIC BISNIS] Melakukan perhitungan markup harga di sini.
    */
   getGameDetail: async (slug, role = "GUEST") => {
-    // 1. Ambil data dari Model
     const game = await gameModel.findBySlug(slug);
-
     if (!game) return null;
 
-    // 2. Tentukan Margin Profit berdasarkan Role
-    let margin = 0.05; // Default User/Guest: 5%
+    // [BARU] Ambil Margin dari Database System Config
+    const config = await adminService.getSystemConfig();
+
+    let margin = config.marginUser; // Default ambil dari DB
 
     if (role === "RESELLER") {
-      margin = 0.02; // Reseller: 2%
+      margin = config.marginReseller;
     } else if (role === "VIP") {
-      margin = 0.03; // VIP: 3%
+      margin = config.marginVip;
     }
 
-    // 3. Mapping Produk dengan Harga Baru (Menyembunyikan Harga Modal)
+    // Mapping Produk dengan Harga Dinamis
     const productsWithPublicPrice = game.products.map((product) => {
-      const sellingPrice = Math.ceil(product.price * (1 + margin));
+      // Rumus: Harga Modal * (1 + Margin DB) + Biaya Layanan DB
+      const serviceFee = config.serviceFee || 0;
+      const sellingPrice = Math.ceil(product.price * (1 + margin) + serviceFee);
 
       return {
         id: product.id,
         name: product.name,
         price: sellingPrice,
         icon: product.icon,
-        // vipCode dan originalPrice tidak diteruskan ke frontend
       };
     });
 
@@ -46,13 +48,6 @@ const gameService = {
       ...game,
       products: productsWithPublicPrice,
     };
-  },
-
-  /**
-   * Memvalidasi ID Player ke Provider.
-   */
-  validateGameAccount: async (slug, userId, zoneId = "") => {
-    return await vipService.checkGameId(slug, userId, zoneId);
   },
 };
 

@@ -1,55 +1,36 @@
 const gameService = require("../services/gameService");
+const response = require("../utils/responseHelper");
+const logger = require("../utils/logger");
 
 const gameController = {
-  // 1. Ambil Semua List Game
   getAllGames: async (req, res) => {
     try {
       const games = await gameService.getAllGames();
-      res.json({ status: "success", data: games });
+      return response.success(res, games);
     } catch (error) {
-      console.error("[Controller] GetAllGames Error:", error);
-      res
-        .status(500)
-        .json({ status: "error", message: "Gagal mengambil data game" });
+      logger.error("GetAllGames Error", error);
+      return response.serverError(res, error);
     }
   },
 
-  // 2. Ambil Detail Game (Support Dynamic Pricing)
   getGameDetail: async (req, res) => {
     try {
-      const { slug } = req.params;
-
-      // Deteksi Role user dari token (Middleware Auth)
-      // Jika user belum login, req.user undefined, default jadi GUEST di service
       const role = req.user ? req.user.role : "GUEST";
+      const game = await gameService.getGameDetail(req.params.slug, role);
 
-      const game = await gameService.getGameDetail(slug, role);
-
-      if (!game) {
-        return res
-          .status(404)
-          .json({ status: "error", message: "Game tidak ditemukan" });
-      }
-
-      res.json({ status: "success", data: game });
+      if (!game) return response.error(res, "Game tidak ditemukan", 404);
+      return response.success(res, game);
     } catch (error) {
-      console.error("[Controller] GetGameDetail Error:", error);
-      res
-        .status(500)
-        .json({ status: "error", message: "Gagal mengambil detail game" });
+      logger.error("GetGameDetail Error", error);
+      return response.serverError(res, error);
     }
   },
 
-  // 3. Cek ID Player
   checkAccount: async (req, res) => {
     try {
       const { slug, userId, zoneId } = req.body;
-
-      if (!slug || !userId) {
-        return res
-          .status(400)
-          .json({ status: "error", message: "Data tidak lengkap" });
-      }
+      if (!slug || !userId)
+        return response.error(res, "Data tidak lengkap", 400);
 
       const result = await gameService.validateGameAccount(
         slug,
@@ -58,24 +39,20 @@ const gameController = {
       );
 
       if (result.result === false) {
-        return res.status(400).json({
-          status: "error",
-          message: result.message || "ID Player tidak ditemukan",
-        });
+        return response.error(
+          res,
+          result.message || "ID Player tidak ditemukan",
+          400
+        );
       }
 
-      res.json({
-        status: "success",
-        data: {
-          username: result.data.userName || result.data,
-          originalResponse: result, // Opsional debug
-        },
+      return response.success(res, {
+        username: result.data.userName || result.data,
+        originalResponse: result,
       });
     } catch (error) {
-      console.error("[Controller] CheckAccount Error:", error);
-      res
-        .status(500)
-        .json({ status: "error", message: "Gagal mengecek ID Player" });
+      logger.error("CheckAccount Error", error);
+      return response.serverError(res, error);
     }
   },
 };

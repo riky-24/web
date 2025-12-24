@@ -8,6 +8,7 @@ const { startCleanupJob } = require("./services/cleanupService");
 const gameRoutes = require("./routes/gameRoutes");
 const authRoutes = require("./routes/authRoutes");
 const orderRoutes = require("./routes/orderRoutes");
+const adminRoutes = require("./routes/adminRoutes");
 
 // --- IMPORT MIDDLEWARES ---
 const {
@@ -47,6 +48,7 @@ app.get("/", (req, res) => {
 app.use("/api/auth", authLimiter, authRoutes);
 app.use("/api/games", orderLimiter, gameRoutes);
 app.use("/api/orders", orderLimiter, orderRoutes);
+app.use("/api/admin", adminRoutes); // [BARU]
 
 // ==========================================
 // 3. Error Handling (Pintu Keluar Terakhir)

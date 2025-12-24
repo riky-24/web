@@ -74,6 +74,22 @@ const authMiddleware = {
       next();
     };
   },
+
+  // [BARU] HANYA ADMIN
+  requireAdmin: (req, res, next) => {
+    // Pastikan user sudah login dulu (dipanggil setelah requireAuth)
+    if (!req.user) {
+      return res
+        .status(401)
+        .json({ message: "Silakan login terlebih dahulu." });
+    }
+
+    if (req.user.role !== "ADMIN") {
+      return res.status(403).json({ message: "Akses Ditolak: Khusus Admin!" });
+    }
+
+    next();
+  },
 };
 
 module.exports = authMiddleware;
