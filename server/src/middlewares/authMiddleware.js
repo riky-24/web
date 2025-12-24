@@ -1,16 +1,9 @@
 const jwt = require("jsonwebtoken");
+const appConfig = require("../config/app"); // Import Config
 
 // [SECURITY CONFIG]
-const JWT_SECRET = process.env.JWT_SECRET || "rahasia";
-
-// Warning di log jika masih pakai default secret di production
-if (
-  process.env.JWT_SECRET === undefined &&
-  process.env.NODE_ENV === "production"
-) {
-  console.error("[FATAL] JWT_SECRET belum diset di environment variable!");
-  process.exit(1); // Matikan server karena tidak aman
-}
+// Ambil Secret dari Central Config
+const JWT_SECRET = appConfig.jwt.secret;
 
 // --- HELPER: Verifikasi Token ---
 const verifyToken = (token) => {

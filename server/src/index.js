@@ -1,4 +1,4 @@
-require("dotenv").config();
+const appConfig = require("./config/app");
 const express = require("express");
 const morgan = require("morgan");
 const { connectDB } = require("./config/database");
@@ -22,7 +22,7 @@ const {
 const { notFound, errorHandler } = require("./middlewares/errorMiddleware");
 
 const app = express();
-const port = process.env.PORT || 5000;
+const port = appConfig.port;
 
 // ==========================================
 // 1. Security & Global Middlewares
@@ -40,6 +40,7 @@ app.get("/", (req, res) => {
   res.status(200).json({
     status: "success",
     message: "Server Game Topup berjalan dengan aman!",
+    env: appConfig.env,
   });
 });
 
