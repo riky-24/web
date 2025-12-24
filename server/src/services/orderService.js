@@ -1,19 +1,21 @@
 const { prisma } = require("../config/database");
 const midtransService = require("./midtransService");
 const vipService = require("./vipResellerService");
+const appConfig = require("../config/app");
+
+// Import Utils (Alat Bantu)
 const { createSHA512, compareSafe } = require("../utils/cryptoHelper");
 const { generateTrxId } = require("../utils/stringHelper");
 
 const orderService = {
   /**
-   * Membuat Order Baru (Pending Payment).
-   * @param {Object} user - Data user yang sedang login (bisa null jika Guest)
-   * @param {Object} orderData - { productId, gameUserId, zoneId, method }
+   * 1. MEMBUAT TRANSAKSI BARU
+   * Mengintegrasikan Database lokal dan Midtrans Snap
    */
   createTransaction: async (user, orderData) => {
     const { productId, gameUserId, zoneId, method } = orderData;
 
-    // 1. Validasi Product
+    // A. Validasi Product
     const product = await prisma.product.findUnique({
       where: { id: productId },
       include: { game: true },
@@ -21,30 +23,29 @@ const orderService = {
 
     if (!product) throw new Error("Produk tidak ditemukan.");
 
-    // 2. Hitung Harga (Bisa disamakan logicnya dengan gameService jika perlu dynamic price saat checkout)
-    // Untuk saat ini kita pakai harga database dulu, atau panggil logic margin lagi.
-    const finalPrice = product.price; // TODO: Implementasikan ulang logic margin jika perlu konsistensi
+    // B. Generate ID Transaksi Unik (Pake Utils)
+    // Format: TRX-TIMESTAMP-RANDOM (Contoh: TRX-1701234567-123)
     const trxId = generateTrxId();
 
-    // 3. Buat Record Order di Database (Status: Pending)
+    // C. Buat Record Order di Database (Status: Pending)
     const newOrder = await prisma.order.create({
       data: {
-        userId: user ? user.id : null, // Support Guest checkout
+        trxId: trxId, // Identitas unik pesanan
+        userId: user ? user.id : null, // Support Guest (User null)
         productId: product.id,
         playerId: gameUserId,
         serverZone: zoneId || "",
-        amount: finalPrice,
+        amount: product.price, // Harga dari DB
         status: "pending",
-        paymentMethod: method || "qris", // Default method
-        trxId: trxId,
+        paymentMethod: method || "qris",
       },
     });
 
-    // 4. Siapkan Data untuk Midtrans
+    // D. Siapkan Data untuk Midtrans Snap
     const itemDetails = [
       {
         id: product.id,
-        price: finalPrice,
+        price: product.price,
         quantity: 1,
         name: `${product.game.name} - ${product.name}`.substring(0, 50),
       },
@@ -55,15 +56,17 @@ const orderService = {
       email: user ? user.email : "guest@store.com",
     };
 
-    // 5. Request ke Midtrans (Snap Token)
+    // E. Request Token Pembayaran ke Midtrans
+    // Note: Kita kirim newOrder.id (UUID/Int) atau newOrder.trxId tergantung setup Midtrans Anda.
+    // Disarankan konsisten, di sini kita pakai ID Database untuk order_id di Midtrans.
     const midtransData = await midtransService.createTransaction(
-      newOrder.id,
+      newOrder.id, // Order ID yang dikirim ke Midtrans
       newOrder.amount,
       customerDetails,
       itemDetails
     );
 
-    // 6. Update Order dengan Token Pembayaran
+    // F. Update Order dengan Token & Redirect URL
     await prisma.order.update({
       where: { id: newOrder.id },
       data: {
@@ -74,14 +77,15 @@ const orderService = {
 
     return {
       orderId: newOrder.id,
+      trxId: newOrder.trxId,
       snapToken: midtransData.token,
       paymentUrl: midtransData.redirect_url,
     };
   },
 
   /**
-   * Menangani Webhook Notifikasi dari Midtrans.
-   * Memvalidasi signature, update status DB, dan order ke Provider jika lunas.
+   * 2. MEMPROSES NOTIFIKASI PEMBAYARAN (WEBHOOK)
+   * Menangani callback dari Midtrans, validasi keamanan, dan eksekusi order ke Provider.
    */
   processPaymentNotification: async (notification) => {
     const {
@@ -97,36 +101,35 @@ const orderService = {
       throw new Error("Invalid Notification Body");
     }
 
-    // --- A. Security: Validasi Signature ---
+    // --- A. SECURITY: Validasi Signature (Pake Utils) ---
+    // Rumus Midtrans: SHA512(order_id + status_code + gross_amount + ServerKey)
+    // Pastikan gross_amount formatnya string (terkadang ada .00 di belakang)
     const dataString = `${order_id}${status_code}${gross_amount}${process.env.MIDTRANS_SERVER_KEY}`;
-    const mySignature = crypto
-      .createHash("sha512")
-      .update(dataString)
-      .digest("hex");
 
-    // Gunakan timingSafeEqual untuk mencegah Timing Attack
-    const isValid = crypto.timingSafeEqual(
-      Buffer.from(signature_key),
-      Buffer.from(mySignature)
-    );
+    const mySignature = createSHA512(dataString);
 
-    if (!isValid)
+    // Bandingkan secara aman (Anti-Timing Attack)
+    const isValid = compareSafe(signature_key, mySignature);
+
+    if (!isValid) {
+      console.warn(`[SECURITY ALERT] Invalid Signature for Order ${order_id}`);
       throw new Error("Invalid Signature! Potential hacking attempt.");
+    }
 
-    // --- B. Cek Data Order ---
+    // --- B. Cek Data Order di Database ---
     const order = await prisma.order.findUnique({
-      where: { id: order_id },
+      where: { id: order_id }, // Pastikan tipe data cocok (String/Int)
       include: { product: true },
     });
 
     if (!order) throw new Error("Order not found in database.");
 
-    // Idempotency: Jika sudah sukses, skip logic berat
+    // Idempotency: Jika sudah sukses/processing, jangan diproses ulang (cegah double topup)
     if (order.status === "success" || order.status === "processing") {
       return { status: "ignored", message: "Order already processed." };
     }
 
-    // --- C. Tentukan Status Baru ---
+    // --- C. Analisa Status Pembayaran ---
     let paymentSuccess = false;
     let newStatus = order.status;
 
@@ -139,7 +142,7 @@ const orderService = {
       newStatus = "failed";
     }
 
-    // Jika pembayaran Gagal/Pending, update status saja lalu return
+    // Jika pembayaran BELUM sukses (Gagal/Pending), update status saja & selesai.
     if (!paymentSuccess) {
       if (newStatus !== order.status) {
         await prisma.order.update({
@@ -150,40 +153,48 @@ const orderService = {
       return { status: "updated", message: `Status updated to ${newStatus}` };
     }
 
-    // --- D. Pembayaran LUNAS -> Proses ke Provider (VIP) ---
-    // Update ke 'processing' dulu (Locking mechanism)
+    // --- D. PEMBAYARAN LUNAS -> EKSEKUSI KE PROVIDER (VIP) ---
+
+    // 1. Set status ke 'processing' (Locking agar tidak ada race condition)
     await prisma.order.update({
       where: { id: order_id },
       data: { status: "processing" },
     });
 
+    console.log(
+      `[ORDER] Processing Topup for ${order.trxId} - ${order.product.name}`
+    );
+
     try {
-      // Panggil VIP Service
+      // 2. Tembak API VIP Reseller
       const trxVip = await vipService.transaction(
-        order.id,
-        order.product.vipCode, // Kode produk di VIP (misal: ML10)
+        order.trxId, // Gunakan TrxId kita sebagai RefID di VIP
+        order.product.vipCode, // Kode produk (misal: ML86)
         order.playerId,
         order.serverZone
       );
 
       if (trxVip.result) {
-        // SUKSES! Barang terkirim
+        // 3. SUKSES: Update DB
         await prisma.order.update({
           where: { id: order_id },
           data: {
             status: "success",
-            vipTrxId: trxVip.data.trxid,
+            vipTrxId: trxVip.data.trxid, // ID Transaksi dari VIP
             note: "Transaction Success",
           },
         });
         return { status: "success", message: "Order fulfilled successfully." };
       } else {
-        // GAGAL di Provider (Saldo User Aman, tapi barang nyangkut)
-        // Di sini bisa ditambahkan logic Refund otomatis ke saldo website jika mau
+        // 4. GAGAL DI PROVIDER (Saldo user aman, tapi barang gagal kirim)
+        console.error(
+          `[PROVIDER FAIL] Order ${order.trxId}: ${trxVip.message}`
+        );
+
         await prisma.order.update({
           where: { id: order_id },
           data: {
-            status: "manual_check", // Set ke manual check agar Admin sadar
+            status: "manual_check", // Butuh penanganan Admin/Refund otomatis
             note: `Provider Error: ${trxVip.message}`,
           },
         });
@@ -193,7 +204,8 @@ const orderService = {
         };
       }
     } catch (error) {
-      console.error("[Order Service] Provider Execution Failed:", error);
+      console.error("[EXECUTION ERROR]", error);
+      // Jika error koneksi/timeout saat nembak VIP
       await prisma.order.update({
         where: { id: order_id },
         data: {
@@ -206,28 +218,34 @@ const orderService = {
   },
 
   /**
-   * Mengambil riwayat order milik user tertentu.
+   * 3. RIWAYAT ORDER USER
    */
   getUserHistory: async (userId) => {
     return await prisma.order.findMany({
       where: { userId },
-      include: { product: { include: { game: true } } },
+      include: {
+        product: {
+          select: { name: true, game: { select: { name: true, slug: true } } },
+        },
+      },
       orderBy: { createdAt: "desc" },
     });
   },
 
   /**
-   * Mengambil detail satu order (Secure check).
+   * 4. DETAIL ORDER (Untuk Halaman Bukti Pembelian)
    */
   getOrderDetail: async (orderId, userId = null) => {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
-      include: { product: { include: { game: true } } },
+      include: {
+        product: { include: { game: true } },
+      },
     });
 
     if (!order) return null;
 
-    // Jika userId diberikan, pastikan dia pemiliknya
+    // Security Check: Jika userId disuplai, pastikan dia pemiliknya
     if (userId && order.userId !== userId) {
       throw new Error("Unauthorized access to order detail.");
     }
