@@ -1,16 +1,16 @@
 const { prisma } = require("../config/database");
 const midtransService = require("./midtransService");
 const vipService = require("./vipResellerService");
-const appConfig = require("../config/app");
 
-// Import Utils (Alat Bantu)
+// Import Config & Utils (Pasukan Khusus)
+const { serverKey } = require("../config/midtrans");
 const { createSHA512, compareSafe } = require("../utils/cryptoHelper");
 const { generateTrxId } = require("../utils/stringHelper");
 
 const orderService = {
   /**
-   * 1. MEMBUAT TRANSAKSI BARU
-   * Mengintegrasikan Database lokal dan Midtrans Snap
+   * 1. MEMBUAT TRANSAKSI BARU (Checkout)
+   * Integrasi: DB Lokal -> Generate TrxID -> Midtrans Snap
    */
   createTransaction: async (user, orderData) => {
     const { productId, gameUserId, zoneId, method } = orderData;
@@ -23,11 +23,12 @@ const orderService = {
 
     if (!product) throw new Error("Produk tidak ditemukan.");
 
-    // B. Generate ID Transaksi Unik (Pake Utils)
-    // Format: TRX-TIMESTAMP-RANDOM (Contoh: TRX-1701234567-123)
+    // B. Generate ID Transaksi Unik (Standardized by StringHelper)
+    // Contoh Output: TRX-170889922-123 (Konsisten & Rapi)
     const trxId = generateTrxId();
 
     // C. Buat Record Order di Database (Status: Pending)
+    // Kita simpan di DB dulu sebelum minta token ke Midtrans biar aman
     const newOrder = await prisma.order.create({
       data: {
         trxId: trxId, // Identitas unik pesanan
@@ -35,7 +36,7 @@ const orderService = {
         productId: product.id,
         playerId: gameUserId,
         serverZone: zoneId || "",
-        amount: product.price, // Harga dari DB
+        amount: product.price, // Harga diambil aman dari DB, bukan dari input user
         status: "pending",
         paymentMethod: method || "qris",
       },
@@ -47,7 +48,7 @@ const orderService = {
         id: product.id,
         price: product.price,
         quantity: 1,
-        name: `${product.game.name} - ${product.name}`.substring(0, 50),
+        name: `${product.game.name} - ${product.name}`.substring(0, 50), // Midtrans punya limit panjang nama
       },
     ];
 
@@ -56,11 +57,10 @@ const orderService = {
       email: user ? user.email : "guest@store.com",
     };
 
-    // E. Request Token Pembayaran ke Midtrans
-    // Note: Kita kirim newOrder.id (UUID/Int) atau newOrder.trxId tergantung setup Midtrans Anda.
-    // Disarankan konsisten, di sini kita pakai ID Database untuk order_id di Midtrans.
+    // E. Request Token Pembayaran ke Midtrans Service
+    // Kita kirim newOrder.id (UUID/Int) sebagai order_id di sistem Midtrans
     const midtransData = await midtransService.createTransaction(
-      newOrder.id, // Order ID yang dikirim ke Midtrans
+      newOrder.id,
       newOrder.amount,
       customerDetails,
       itemDetails
@@ -101,14 +101,18 @@ const orderService = {
       throw new Error("Invalid Notification Body");
     }
 
-    // --- A. SECURITY: Validasi Signature (Pake Utils) ---
-    // Rumus Midtrans: SHA512(order_id + status_code + gross_amount + ServerKey)
-    // Pastikan gross_amount formatnya string (terkadang ada .00 di belakang)
-    const dataString = `${order_id}${status_code}${gross_amount}${process.env.MIDTRANS_SERVER_KEY}`;
+    // ============================================================
+    // SECURITY CHECK: Validasi Signature
+    // Rumus: SHA512(order_id + status_code + gross_amount + ServerKey)
+    // ============================================================
 
+    // Pastikan gross_amount menjadi string agar konkatenasi benar
+    const dataString = `${order_id}${status_code}${gross_amount}${serverKey}`;
+
+    // Buat hash lokal menggunakan Utils
     const mySignature = createSHA512(dataString);
 
-    // Bandingkan secara aman (Anti-Timing Attack)
+    // Bandingkan hash lokal vs hash dari Midtrans (Anti-Timing Attack via Utils)
     const isValid = compareSafe(signature_key, mySignature);
 
     if (!isValid) {
@@ -153,7 +157,9 @@ const orderService = {
       return { status: "updated", message: `Status updated to ${newStatus}` };
     }
 
-    // --- D. PEMBAYARAN LUNAS -> EKSEKUSI KE PROVIDER (VIP) ---
+    // ============================================================
+    // PEMBAYARAN LUNAS -> EKSEKUSI KE PROVIDER (VIP)
+    // ============================================================
 
     // 1. Set status ke 'processing' (Locking agar tidak ada race condition)
     await prisma.order.update({
