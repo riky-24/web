@@ -3,6 +3,13 @@ const jwt = require("jsonwebtoken");
 const userModel = require("../models/userModel");
 const logModel = require("../models/logModel");
 const appConfig = require("../config/app");
+// [BARU] Import Konstanta
+const {
+  ROLES,
+  AUTH_STEPS,
+  TOKEN_TYPES,
+  MESSAGES,
+} = require("../config/constants");
 
 const loginService = {
   // TAHAP 1: Cek Password & Tentukan Nasib
@@ -11,7 +18,8 @@ const loginService = {
 
     // 1. Ambil data sensitif
     const user = await userModel.findForLogin(normalizedEmail);
-    const invalidMsg = "Email atau Password salah!";
+    // [FIX] Gunakan Pesan Baku dari Config
+    const invalidMsg = MESSAGES.AUTH.INVALID_CREDENTIALS;
 
     // 2. Cek Password (Anti-Timing Attack)
     if (!user) {
@@ -26,19 +34,23 @@ const loginService = {
     if (!isMatch) throw new Error(invalidMsg);
 
     // 3. Validasi Akun
-    if (!user.isVerified) throw new Error("Akun belum diverifikasi.");
-    if (user.isActive === false) throw new Error("Akun dinonaktifkan.");
+    if (!user.isVerified) throw new Error(MESSAGES.AUTH.UNVERIFIED);
+    if (user.isActive === false) throw new Error(MESSAGES.AUTH.ACCOUNT_LOCKED);
 
-    // 4. LOGIKA STATE MACHINE (MFA CHECK)
-    // Contoh: Admin WAJIB MFA. User biasa lolos.
-    const needsMfa = user.role === "ADMIN";
+    // 4. LOGIKA STATE MACHINE
+    // [FIX] Gunakan Role Baku dari Config
+    const needsMfa = user.role === ROLES.ADMIN;
 
     if (needsMfa) {
       // --> Masuk Ruang Tunggu (Pre-Auth)
       const preAuthToken = jwt.sign(
-        { id: user.id, role: "PRE_AUTH", step: "MFA" },
+        {
+          id: user.id,
+          role: TOKEN_TYPES.PRE_AUTH,
+          step: AUTH_STEPS.MFA_VERIFICATION,
+        },
         appConfig.jwt.secret,
-        { expiresIn: "5m" } // Token ini cuma hidup 5 menit
+        { expiresIn: appConfig.jwt.preAuthExpiresIn } // [FIX] Ambil durasi dari Config
       );
 
       await logModel.create({
@@ -55,7 +67,7 @@ const loginService = {
     const token = jwt.sign(
       { id: user.id, role: user.role, status: "FULL" },
       appConfig.jwt.secret,
-      { expiresIn: appConfig.jwt.expiresIn }
+      { expiresIn: appConfig.jwt.accessExpiresIn } // [FIX] Ambil durasi dari Config
     );
 
     await logModel.create({
@@ -65,13 +77,11 @@ const loginService = {
       ipAddress,
     });
 
-    // Bersihkan password sebelum dikirim ke controller
     delete user.password;
-
     return { status: "SUCCESS", token, user };
   },
 
-  // TAHAP 2: Verifikasi Kode (Jika kena MFA)
+  // TAHAP 2: Verifikasi Kode
   verifyMfa: async (preAuthToken, mfaCode, ipAddress) => {
     let decoded;
     try {
@@ -80,19 +90,20 @@ const loginService = {
       throw new Error("Sesi login kadaluwarsa.");
     }
 
-    if (decoded.role !== "PRE_AUTH") throw new Error("Token tidak valid.");
+    // [FIX] Cek Tipe Token pakai Config
+    if (decoded.role !== TOKEN_TYPES.PRE_AUTH)
+      throw new Error("Token tidak valid.");
 
     const user = await userModel.findById(decoded.id);
     if (!user) throw new Error("User tidak ditemukan.");
 
-    // [TODO] Ganti logika "123456" dengan TOTP Real nanti
+    // [TODO] Nanti ganti TOTP Real
     if (mfaCode !== "123456") throw new Error("Kode Salah.");
 
-    // Terbitkan Token Asli
     const token = jwt.sign(
       { id: user.id, role: user.role, status: "FULL" },
       appConfig.jwt.secret,
-      { expiresIn: appConfig.jwt.expiresIn }
+      { expiresIn: appConfig.jwt.accessExpiresIn } // [FIX] Ambil durasi dari Config
     );
 
     await logModel.create({

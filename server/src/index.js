@@ -2,70 +2,79 @@ const appConfig = require("./config/app");
 const express = require("express");
 const morgan = require("morgan");
 const { connectDB } = require("./config/database");
-const { startCleanupJob } = require("./services/cleanupService");
 
 // --- IMPORT ROUTE ---
-const gameRoutes = require("./routes/gameRoutes");
-const authRoutes = require("./routes/authRoutes");
-const orderRoutes = require("./routes/orderRoutes");
-const adminRoutes = require("./routes/adminRoutes");
+// Kita fokus ke satu jalur ini saja dulu
+const loginRoutes = require("./routes/loginRoutes");
 
-// --- IMPORT MIDDLEWARES ---
-const {
-  authLimiter,
-  orderLimiter,
-} = require("./middlewares/rateLimitMiddleware");
+// --- IMPORT MIDDLEWARES (PERTAHANAN) ---
+const { globalLimiter } = require("./middlewares/rateLimitMiddleware"); // Anti-DDoS
 const {
   helmetConfig,
   corsConfig,
-} = require("./middlewares/securityMiddleware");
-// Import Error Handler Baru
-const { notFound, errorHandler } = require("./middlewares/errorMiddleware");
+} = require("./middlewares/securityMiddleware"); // Armor & Satpam Domain
+const { notFound, errorHandler } = require("./middlewares/errorMiddleware"); // Pemadam Kebakaran
 
 const app = express();
 const port = appConfig.port;
 
 // ==========================================
-// 1. Security & Global Middlewares
+// 1. GLOBAL SECURITY LAYER (PERISAI UTAMA)
 // ==========================================
+
+// A. Pasang Helm (Security Headers) - Wajib paling atas!
 app.use(helmetConfig);
+
+// B. Cek KTP Domain (CORS) - Siapa yang boleh request?
 app.use(corsConfig);
-app.use(morgan("dev"));
-app.use(express.json());
+
+// C. Pasang Portal Anti-DDoS (Rate Limiter Global)
+// IP yang nembak ribuan kali dalam sedetik akan langsung diblokir di sini
+app.use(globalLimiter);
+
+// ==========================================
+// 2. UTILITY LAYER
+// ==========================================
+app.use(morgan("dev")); // Log request ke console
+app.use(express.json()); // Supaya bisa baca JSON
 app.use(express.urlencoded({ extended: true }));
 
 // ==========================================
-// 2. Routes (Pintu Masuk)
+// 3. ROUTES LAYER (PINTU MASUK)
 // ==========================================
+
+// Health Check (Cek server hidup/mati)
 app.get("/", (req, res) => {
   res.status(200).json({
     status: "success",
-    message: "Server Game Topup berjalan dengan aman!",
+    message: "🛡️ Sistem Login Aman Terkendali 🛡️",
     env: appConfig.env,
   });
 });
 
-app.use("/api/auth", authLimiter, authRoutes);
-app.use("/api/games", orderLimiter, gameRoutes);
-app.use("/api/orders", orderLimiter, orderRoutes);
-app.use("/api/admin", adminRoutes); // [BARU]
+// Jalur Khusus Login (Sudah ada rate limiter khusus di dalamnya)
+app.use("/api/login", loginRoutes);
 
 // ==========================================
-// 3. Error Handling (Pintu Keluar Terakhir)
+// 4. ERROR HANDLING (JARING PENGAMAN)
 // ==========================================
 
-// Handle 404 (Jika rute tidak ditemukan)
+// Tangkap request nyasar (404)
 app.use(notFound);
 
-// Handle Global Error (Jika ada crash/error)
+// Tangkap error sistem (500)
 app.use(errorHandler);
 
 // ==========================================
-// 4. Start Server
+// 5. START SERVER
 // ==========================================
 connectDB().then(() => {
   app.listen(port, () => {
-    console.log(`\n[SERVER] Berjalan di http://localhost:${port}`);
-    startCleanupJob();
+    console.log(
+      `\n[SERVER] Markas Komando Login Aktif di http://localhost:${port}`
+    );
+    console.log(`[SECURITY] Global Rate Limiter: ON`);
+    console.log(`[SECURITY] Helmet Protection: ON`);
+    console.log(`[SECURITY] CORS Whitelist: ON`);
   });
 });
