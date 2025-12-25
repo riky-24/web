@@ -64,6 +64,44 @@ const adminModel = {
       },
     });
   },
+
+  // [BARU] Simpan Token Reset Password
+  saveResetToken: async (id, token, expiryDate) => {
+    return await prisma.user.update({
+      where: { id },
+      data: {
+        resetPasswordToken: token,
+        resetPasswordExpires: expiryDate,
+      },
+    });
+  },
+
+  // [BARU] Cari Admin berdasarkan Token yang masih berlaku
+  findAdminByResetToken: async (token) => {
+    return await prisma.user.findFirst({
+      where: {
+        resetPasswordToken: token,
+        resetPasswordExpires: {
+          gt: new Date(), // Expires harus Lebih Besar (Greater Than) dari sekarang
+        },
+      },
+    });
+  },
+
+  // [BARU] Update Password Baru & Hapus Token
+  updatePasswordAndClearToken: async (id, hashedPassword) => {
+    return await prisma.user.update({
+      where: { id },
+      data: {
+        password: hashedPassword,
+        resetPasswordToken: null,
+        resetPasswordExpires: null,
+        // Sekalian buka kunci akun jika sebelumnya terkunci
+        failedLoginAttempts: 0,
+        lockUntil: null,
+      },
+    });
+  },
 };
 
 module.exports = adminModel;

@@ -47,6 +47,12 @@ const rateLimitMiddleware = {
       return response.error(res, "Kode salah terlalu sering.", 429);
     },
   }),
+
+  resetPassLimiter: rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 Jam
+    max: 3, // Maksimal minta reset 3x per jam per IP
+    message: "Terlalu banyak permintaan reset password.",
+  }),
 };
 
 module.exports = rateLimitMiddleware;
