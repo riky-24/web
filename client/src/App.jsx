@@ -1,53 +1,48 @@
+// client/src/App.jsx
 import React from "react";
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
-import { AuthProvider } from "./context/AuthContext"; // Integrasi Context Login
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  Navigate,
+} from "react-router-dom";
+import { AuthProvider } from "./context/AuthContext";
 
-// --- IMPORT HALAMAN ---
-import Home from "./page/Home";
-import GameDetail from "./page/GameDetail";
-import Login from "./page/Login";
-import Register from "./page/Register";
-import Profile from "./page/Profile";
-import OrderStatus from "./page/OrderStatus";
-import ForgotPassword from "./page/ForgotPassword";
-import VerifyEmail from "./page/VerifyEmail";
-import ResetPassword from "./page/ResetPassword";
+// Layout & Pages (Hanya Admin)
+import AdminLayout from "./layouts/AdminLayout";
+import LoginAdmin from "./page/admin/LoginAdmin"; // Pastikan file ini ada (yang desain gelap tadi)
+import AdminDashboard from "./page/admin/DashBoard";
+import AuditLogs from "./page/admin/AuditLogs";
+
+// Kita tidak butuh Home, GameDetail, dll di sini karena ini web khusus Admin.
 
 function App() {
   return (
-    // 1. Bungkus dengan AuthProvider agar status login terbaca di semua halaman
     <AuthProvider>
       <Router>
-        <div className="font-sans text-slate-800 antialiased">
+        <div className="font-sans text-slate-800 antialiased bg-slate-50 min-h-screen">
           <Routes>
-            {/* --- PUBLIC ROUTES (Bisa diakses siapa saja) --- */}
-            <Route path="/" element={<Home />} />
-            <Route path="/game/:slug" element={<GameDetail />} />
-            <Route path="/order-status" element={<OrderStatus />} />
+            {/* --- PUBLIC ROUTES --- */}
+            {/* Redirect root '/' langsung ke Login Admin */}
+            <Route path="/" element={<Navigate to="/login" replace />} />
 
-            {/* --- AUTH ROUTES (Login/Register) --- */}
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/forgot-password" element={<ForgotPassword />} />
-            <Route path="/verify-email" element={<VerifyEmail />} />
+            {/* Pintu Masuk Tunggal (Kita rename pathnya jadi /login biasa karena ini web khusus admin) */}
+            <Route path="/login" element={<LoginAdmin />} />
 
-            {/* --- PROTECTED ROUTES (Halaman User Login) --- */}
-            {/* Nanti kita bisa tambahkan logika redirect jika belum login */}
-            <Route path="/profile" element={<Profile />} />
-            <Route path="/reset-password" element={<ResetPassword />} />
+            {/* --- PROTECTED ADMIN AREA --- */}
+            <Route path="/admin" element={<AdminLayout />}>
+              <Route
+                index
+                element={<Navigate to="/admin/dashboard" replace />}
+              />
+              <Route path="dashboard" element={<AdminDashboard />} />
+              <Route path="logs" element={<AuditLogs />} />
 
-            {/* --- 404 NOT FOUND --- */}
-            <Route
-              path="*"
-              element={
-                <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white">
-                  <div className="text-center">
-                    <h1 className="text-4xl font-bold mb-4">404</h1>
-                    <p>Halaman tidak ditemukan.</p>
-                  </div>
-                </div>
-              }
-            />
+              {/* Nanti tambah: Orders, Users, Products di sini */}
+            </Route>
+
+            {/* --- FALLBACK --- */}
+            <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>
         </div>
       </Router>
