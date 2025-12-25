@@ -1,8 +1,13 @@
-// client/src/page/admin/LoginAdmin.jsx
 import React, { useState } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { useNavigate } from "react-router-dom";
-import { ShieldCheck, Lock, AlertCircle, ChevronRight } from "lucide-react";
+import {
+  ShieldCheck,
+  Lock,
+  AlertCircle,
+  ChevronRight,
+  Loader2,
+} from "lucide-react";
 
 const LoginAdmin = () => {
   const [formData, setFormData] = useState({
@@ -10,7 +15,7 @@ const LoginAdmin = () => {
     password: "",
     mfaCode: "",
   });
-  const [step, setStep] = useState("CREDENTIALS"); // Tahap 1: Email/Pass, Tahap 2: MFA
+  const [step, setStep] = useState("CREDENTIALS"); // CREDENTIALS | MFA
   const [preAuthToken, setPreAuthToken] = useState(null);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -25,35 +30,31 @@ const LoginAdmin = () => {
 
     try {
       if (step === "CREDENTIALS") {
-        // --- TAHAP 1: INPUT KREDENSIAL ---
+        // TAHAP 1: Kirim Email & Pass
         const result = await login(formData.email, formData.password);
 
         if (result?.needMfa) {
-          // Jika Server minta MFA, kita pindah ke tampilan input kode
+          // Server minta MFA -> Pindah ke Input OTP
           setPreAuthToken(result.preAuthToken);
           setStep("MFA");
         } else {
-          // Jika lolos langsung, PASTIIN DIA ADMIN
+          // Lolos langsung -> Cek apakah ADMIN?
           if (result.role !== "ADMIN") {
-            throw new Error("Akses Ditolak: Anda bukan Admin.");
+            throw new Error("Akses Ditolak: Anda bukan Administrator.");
           }
-          // Masuk ke Ruang Kendali
           navigate("/admin/dashboard");
         }
       } else {
-        // --- TAHAP 2: INPUT KODE MFA ---
+        // TAHAP 2: Kirim OTP
         const result = await verifyMfa(preAuthToken, formData.mfaCode);
 
         if (result.role !== "ADMIN") {
-          throw new Error("Akses Ditolak: Anda bukan Admin.");
+          throw new Error("Akses Ditolak: Anda bukan Administrator.");
         }
         navigate("/admin/dashboard");
       }
     } catch (err) {
-      // Tampilkan error cantik
-      setError(
-        err.response?.data?.message || err.message || "Gagal masuk sistem."
-      );
+      setError(err.response?.data?.message || err.message || "Login gagal.");
     } finally {
       setIsLoading(false);
     }
@@ -62,18 +63,18 @@ const LoginAdmin = () => {
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
       <div className="bg-slate-900 border border-slate-800 w-full max-w-md p-8 rounded-2xl shadow-2xl relative overflow-hidden">
-        {/* Hiasan Background */}
-        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-purple-600"></div>
+        {/* Aksen Garis Atas */}
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 to-indigo-600"></div>
 
         <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-blue-500/10 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.5)]">
+          <div className="w-16 h-16 bg-blue-500/10 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-blue-500/20 shadow-[0_0_15px_rgba(59,130,246,0.3)]">
             <ShieldCheck size={32} />
           </div>
           <h1 className="text-2xl font-bold text-white tracking-wide">
             ADMIN<span className="text-blue-500">PANEL</span>
           </h1>
           <p className="text-slate-500 text-xs mt-2 uppercase tracking-widest">
-            Sistem Pemantauan Terpusat
+            Secure Access Gateway
           </p>
         </div>
 
@@ -88,13 +89,13 @@ const LoginAdmin = () => {
           {step === "CREDENTIALS" ? (
             <div className="space-y-4 animate-in fade-in slide-in-from-left-4 duration-300">
               <div>
-                <label className="block text-slate-400 text-xs font-bold mb-1 uppercase">
+                <label className="block text-slate-400 text-[10px] font-bold mb-1 uppercase tracking-wider">
                   Email Akses
                 </label>
                 <input
                   type="email"
                   className="w-full bg-slate-950 border border-slate-800 text-white px-4 py-3 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder-slate-700"
-                  placeholder="admin@pusat.com"
+                  placeholder="admin@server.com"
                   value={formData.email}
                   onChange={(e) =>
                     setFormData({ ...formData, email: e.target.value })
@@ -103,7 +104,7 @@ const LoginAdmin = () => {
                 />
               </div>
               <div>
-                <label className="block text-slate-400 text-xs font-bold mb-1 uppercase">
+                <label className="block text-slate-400 text-[10px] font-bold mb-1 uppercase tracking-wider">
                   Kode Sandi
                 </label>
                 <input
@@ -151,7 +152,7 @@ const LoginAdmin = () => {
             className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3.5 rounded-lg transition-all shadow-lg shadow-blue-900/20 flex items-center justify-center gap-2 mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isLoading ? (
-              <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+              <Loader2 className="animate-spin" size={20} />
             ) : (
               <>
                 {step === "CREDENTIALS" ? "Buka Akses" : "Verifikasi"}{" "}
@@ -163,7 +164,7 @@ const LoginAdmin = () => {
 
         <div className="mt-8 text-center border-t border-slate-800 pt-4">
           <p className="text-slate-600 text-[10px] uppercase tracking-wider">
-            Protected by Server-Side Forensics & Rate Limiting
+            Monitoring System • Authorized Personnel Only
           </p>
         </div>
       </div>

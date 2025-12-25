@@ -1,33 +1,29 @@
 const constants = {
-  // ROLE USER
+  // ROLE KHUSUS PERSONIL (Tidak ada role USER publik)
   ROLES: {
-    ADMIN: "ADMIN",
-    USER: "USER",
-    VIP: "VIP",
-    RESELLER: "RESELLER",
+    ADMIN: "ADMIN", // Super Admin
+    STAFF: "STAFF", // Petugas Operasional
+    RESELLER: "RESELLER", // Partner VIP
   },
 
-  // TAHAPAN LOGIN (STATE MACHINE)
   AUTH_STEPS: {
     INITIATE: "INITIATE",
     MFA_VERIFICATION: "MFA",
     COMPLETE: "COMPLETE",
   },
 
-  // JENIS TOKEN
   TOKEN_TYPES: {
-    PRE_AUTH: "PRE_AUTH_TOKEN", // Token Ruang Tunggu
-    ACCESS: "ACCESS_TOKEN", // Token Masuk
-    REFRESH: "REFRESH_TOKEN", // Token Perpanjangan
+    PRE_AUTH: "PRE_AUTH_TOKEN",
+    ACCESS: "ACCESS_TOKEN",
+    REFRESH: "REFRESH_TOKEN",
   },
 
-  // PESAN RESPON STANDAR (Supaya konsisten)
   MESSAGES: {
     AUTH: {
-      INVALID_CREDENTIALS: "Email atau Password salah.", // Pesan generik (aman)
-      MFA_REQUIRED: "Verifikasi tambahan diperlukan.",
-      ACCOUNT_LOCKED: "Akun dikunci sementara demi keamanan.",
-      UNVERIFIED: "Akun belum diverifikasi.",
+      INVALID_CREDENTIALS: "Akses ditolak. Email atau Password salah.",
+      MFA_REQUIRED: "Verifikasi Keamanan (MFA) diperlukan.",
+      ACCOUNT_LOCKED: "Akun ditangguhkan. Hubungi Super Admin.",
+      UNAUTHORIZED_ROLE: "Anda tidak memiliki izin akses ke Panel ini.", // Pesan baru
     },
   },
 };

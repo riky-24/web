@@ -1,80 +1,32 @@
-const appConfig = require("./config/app");
 const express = require("express");
-const morgan = require("morgan");
+const appConfig = require("./config/app");
 const { connectDB } = require("./config/database");
-
-// --- IMPORT ROUTE ---
-// Kita fokus ke satu jalur ini saja dulu
-const loginRoutes = require("./routes/loginRoutes");
-
-// --- IMPORT MIDDLEWARES (PERTAHANAN) ---
-const { globalLimiter } = require("./middlewares/rateLimitMiddleware"); // Anti-DDoS
+const { globalLimiter } = require("./middlewares/rateLimitMiddleware");
 const {
   helmetConfig,
   corsConfig,
-} = require("./middlewares/securityMiddleware"); // Armor & Satpam Domain
-const { notFound, errorHandler } = require("./middlewares/errorMiddleware"); // Pemadam Kebakaran
+} = require("./middlewares/securityMiddleware");
+const adminAuthController = require("./controllers/adminAuthController");
 
 const app = express();
-const port = appConfig.port;
 
-// ==========================================
-// 1. GLOBAL SECURITY LAYER (PERISAI UTAMA)
-// ==========================================
-
-// A. Pasang Helm (Security Headers) - Wajib paling atas!
+// MIDDLEWARE PERTAHANAN
 app.use(helmetConfig);
-
-// B. Cek KTP Domain (CORS) - Siapa yang boleh request?
 app.use(corsConfig);
-
-// C. Pasang Portal Anti-DDoS (Rate Limiter Global)
-// IP yang nembak ribuan kali dalam sedetik akan langsung diblokir di sini
 app.use(globalLimiter);
+app.use(express.json());
 
-// ==========================================
-// 2. UTILITY LAYER
-// ==========================================
-app.use(morgan("dev")); // Log request ke console
-app.use(express.json()); // Supaya bisa baca JSON
-app.use(express.urlencoded({ extended: true }));
+// ROUTE KHUSUS ADMIN
+// Tahap 1: Cek Password
+app.post("/api/admin/login", adminAuthController.login);
+// Tahap 2: Cek OTP
+app.post("/api/admin/verify-mfa", adminAuthController.verifyMfa);
 
-// ==========================================
-// 3. ROUTES LAYER (PINTU MASUK)
-// ==========================================
-
-// Health Check (Cek server hidup/mati)
-app.get("/", (req, res) => {
-  res.status(200).json({
-    status: "success",
-    message: "🛡️ Sistem Login Aman Terkendali 🛡️",
-    env: appConfig.env,
-  });
-});
-
-// Jalur Khusus Login (Sudah ada rate limiter khusus di dalamnya)
-app.use("/api/login", loginRoutes);
-
-// ==========================================
-// 4. ERROR HANDLING (JARING PENGAMAN)
-// ==========================================
-
-// Tangkap request nyasar (404)
-app.use(notFound);
-
-// Tangkap error sistem (500)
-app.use(errorHandler);
-
-// ==========================================
-// 5. START SERVER
-// ==========================================
+// Jalankan Database & Server
 connectDB().then(() => {
-  app.listen(port, () => {
-    console.log(
-      `\n[SERVER] Markas Komando Login Aktif di http://localhost:${port}`
-    );
-    console.log(`[SECURITY] Global Rate Limiter: ON`);
-    console.log(`[SECURITY] Helmet Protection: ON`);
-    console.log(`[SECURITY] CORS Whitelist: ON`);
+  app.listen(appConfig.port, () => {
+    console.log(`\n[ADMIN SERVER] Berjalan di port ${appConfig.port}`);
+    console.log(`[SECURITY] MFA Enforcement: ACTIVE`);
+    console.log(`[SECURITY] Admin Role Filter: ACTIVE`);
   });
 });
