@@ -1,6 +1,6 @@
 const loginService = require("../services/loginService");
+const response = require("../utils/responseHelper");
 const logger = require("../utils/logger");
-// [BARU] Import Kamus Baku biar pesan konsisten
 const { MESSAGES } = require("../config/constants");
 
 const loginController = {
@@ -8,45 +8,44 @@ const loginController = {
   initiate: async (req, res) => {
     try {
       const { email, password } = req.body;
-      // Oper IP Address untuk keperluan log forensik & rate limit
       const result = await loginService.initiate(email, password, req.ip);
 
-      // Skenario A: Dicegat MFA (Admin/Risk User)
+      // Skenario: Kena MFA
       if (result.status === "MFA_REQUIRED") {
-        logger.info(`MFA Challenge for ${email}`, "LoginFlow");
-
+        logger.info(`Real MFA Challenge for ${email}`, "LoginFlow");
         return res.status(200).json({
           status: "success",
-          // [FIX] Gunakan pesan dari constants
-          message:
-            MESSAGES.AUTH.MFA_REQUIRED || "Verifikasi tambahan diperlukan.",
+          message: MESSAGES.AUTH.MFA_REQUIRED,
           data: {
             needMfa: true,
-            preAuthToken: result.preAuthToken, // Tiket masuk ruang tunggu
+            preAuthToken: result.preAuthToken,
           },
         });
       }
 
-      // Skenario B: Lolos Langsung
+      // Skenario: Login Sukses
       return response.success(
         res,
         { token: result.token, user: result.user },
         "Login berhasil."
       );
     } catch (error) {
-      // Log error system ke file (biar admin tau)
-      logger.error("Login Initiate Error", error);
-
-      // Balas ke user dengan 401 (Unauthorized)
-      // Jangan kasih detail error 500 ke user, cukup pesan aman
+      logger.error("Login Error", error);
+      // Gunakan 401 Unauthorized untuk semua kegagalan login (Security Practice)
       return response.error(res, error.message, 401);
     }
   },
 
-  // Pintu 2: Cek Kode OTP
+  // Pintu 2: Cek Kode Authenticator
   verifyMfa: async (req, res) => {
     try {
       const { preAuthToken, mfaCode } = req.body;
+
+      // Validasi input sederhana di controller
+      if (!mfaCode || mfaCode.length < 6) {
+        return response.error(res, "Kode harus 6 digit.", 400);
+      }
+
       const result = await loginService.verifyMfa(
         preAuthToken,
         mfaCode,
@@ -56,7 +55,7 @@ const loginController = {
       return response.success(
         res,
         { token: result.token, user: result.user },
-        "Verifikasi MFA sukses. Selamat datang."
+        "Verifikasi Dua Langkah Sukses."
       );
     } catch (error) {
       logger.error("MFA Verify Error", error);

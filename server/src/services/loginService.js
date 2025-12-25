@@ -1,9 +1,9 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const speakeasy = require("speakeasy"); // [BARU] Library TOTP Real
 const userModel = require("../models/userModel");
 const logModel = require("../models/logModel");
 const appConfig = require("../config/app");
-// [BARU] Import Konstanta
 const {
   ROLES,
   AUTH_STEPS,
@@ -16,12 +16,11 @@ const loginService = {
   initiate: async (email, password, ipAddress) => {
     const normalizedEmail = email.toLowerCase();
 
-    // 1. Ambil data sensitif
+    // 1. Ambil Data
     const user = await userModel.findForLogin(normalizedEmail);
-    // [FIX] Gunakan Pesan Baku dari Config
     const invalidMsg = MESSAGES.AUTH.INVALID_CREDENTIALS;
 
-    // 2. Cek Password (Anti-Timing Attack)
+    // 2. Cek Password
     if (!user) {
       await bcrypt.compare(
         password || "dummy",
@@ -29,7 +28,6 @@ const loginService = {
       );
       throw new Error(invalidMsg);
     }
-
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) throw new Error(invalidMsg);
 
@@ -37,9 +35,14 @@ const loginService = {
     if (!user.isVerified) throw new Error(MESSAGES.AUTH.UNVERIFIED);
     if (user.isActive === false) throw new Error(MESSAGES.AUTH.ACCOUNT_LOCKED);
 
-    // 4. LOGIKA STATE MACHINE
-    // [FIX] Gunakan Role Baku dari Config
-    const needsMfa = user.role === ROLES.ADMIN;
+    // 4. LOGIKA REAL MFA (Bukan cuma cek Role)
+    // MFA Wajib jika: (User adalah Admin) ATAU (User emang mengaktifkan MFA)
+    const isAdmin = user.role === ROLES.ADMIN;
+    const isMfaActive = user.isMfaActive; // Dari DB
+
+    // Logic: Admin WAJIB MFA. User biasa OPSIONAL (tergantung settingan dia).
+    // Tapi user harus punya 'mfaSecret' di DB dulu.
+    const needsMfa = (isAdmin || isMfaActive) && user.mfaSecret;
 
     if (needsMfa) {
       // --> Masuk Ruang Tunggu (Pre-Auth)
@@ -50,13 +53,13 @@ const loginService = {
           step: AUTH_STEPS.MFA_VERIFICATION,
         },
         appConfig.jwt.secret,
-        { expiresIn: appConfig.jwt.preAuthExpiresIn } // [FIX] Ambil durasi dari Config
+        { expiresIn: appConfig.jwt.preAuthExpiresIn }
       );
 
       await logModel.create({
         action: "AUTH_CHALLENGE",
         userId: user.id,
-        details: "MFA Required",
+        details: "Real MFA Challenge",
         ipAddress,
       });
 
@@ -67,7 +70,7 @@ const loginService = {
     const token = jwt.sign(
       { id: user.id, role: user.role, status: "FULL" },
       appConfig.jwt.secret,
-      { expiresIn: appConfig.jwt.accessExpiresIn } // [FIX] Ambil durasi dari Config
+      { expiresIn: appConfig.jwt.accessExpiresIn }
     );
 
     await logModel.create({
@@ -77,41 +80,65 @@ const loginService = {
       ipAddress,
     });
 
+    // Hapus data sensitif
     delete user.password;
+    delete user.mfaSecret;
+
     return { status: "SUCCESS", token, user };
   },
 
-  // TAHAP 2: Verifikasi Kode
+  // TAHAP 2: Verifikasi Kode (REAL TIME CHECK)
   verifyMfa: async (preAuthToken, mfaCode, ipAddress) => {
     let decoded;
     try {
       decoded = jwt.verify(preAuthToken, appConfig.jwt.secret);
     } catch (e) {
-      throw new Error("Sesi login kadaluwarsa.");
+      throw new Error("Sesi login kadaluwarsa. Silakan login ulang.");
     }
 
-    // [FIX] Cek Tipe Token pakai Config
     if (decoded.role !== TOKEN_TYPES.PRE_AUTH)
       throw new Error("Token tidak valid.");
 
     const user = await userModel.findById(decoded.id);
     if (!user) throw new Error("User tidak ditemukan.");
+    if (!user.mfaSecret)
+      throw new Error("Akun ini tidak memiliki konfigurasi MFA.");
 
-    // [TODO] Nanti ganti TOTP Real
-    if (mfaCode !== "123456") throw new Error("Kode Salah.");
+    // [REAL] Verifikasi Kode menggunakan Speakeasy
+    const isValid = speakeasy.totp.verify({
+      secret: user.mfaSecret,
+      encoding: "base32", // Standar Google Auth
+      token: mfaCode,
+      window: 1, // Toleransi waktu +/- 30 detik (biar gak strict banget)
+    });
 
+    if (!isValid) {
+      await logModel.create({
+        action: "AUTH_MFA_FAIL",
+        userId: user.id,
+        details: "Wrong OTP Code",
+        ipAddress,
+        level: "warn",
+      });
+      throw new Error("Kode Authenticator salah.");
+    }
+
+    // Lolos Verifikasi
     const token = jwt.sign(
       { id: user.id, role: user.role, status: "FULL" },
       appConfig.jwt.secret,
-      { expiresIn: appConfig.jwt.accessExpiresIn } // [FIX] Ambil durasi dari Config
+      { expiresIn: appConfig.jwt.accessExpiresIn }
     );
 
     await logModel.create({
       action: "AUTH_MFA_SUCCESS",
       userId: user.id,
-      details: "MFA Verified",
+      details: "Real MFA Verified",
       ipAddress,
     });
+
+    // Bersihkan secret sebelum return
+    delete user.mfaSecret;
 
     return { token, user };
   },
