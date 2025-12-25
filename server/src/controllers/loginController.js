@@ -1,43 +1,49 @@
 const loginService = require("../services/loginService");
-const response = require("../utils/responseHelper");
 const logger = require("../utils/logger");
+// [BARU] Import Kamus Baku biar pesan konsisten
+const { MESSAGES } = require("../config/constants");
 
 const loginController = {
-  // Handle Login Awal
+  // Pintu 1: Cek Password
   initiate: async (req, res) => {
     try {
       const { email, password } = req.body;
+      // Oper IP Address untuk keperluan log forensik & rate limit
       const result = await loginService.initiate(email, password, req.ip);
 
-      // Skenario 1: Kena MFA
+      // Skenario A: Dicegat MFA (Admin/Risk User)
       if (result.status === "MFA_REQUIRED") {
         logger.info(`MFA Challenge for ${email}`, "LoginFlow");
+
         return res.status(200).json({
           status: "success",
-          message: "Verifikasi tambahan diperlukan.",
+          // [FIX] Gunakan pesan dari constants
+          message:
+            MESSAGES.AUTH.MFA_REQUIRED || "Verifikasi tambahan diperlukan.",
           data: {
             needMfa: true,
-            preAuthToken: result.preAuthToken,
+            preAuthToken: result.preAuthToken, // Tiket masuk ruang tunggu
           },
         });
       }
 
-      // Skenario 2: Login Sukses
+      // Skenario B: Lolos Langsung
       return response.success(
         res,
-        {
-          token: result.token,
-          user: result.user,
-        },
-        "Login berhasil"
+        { token: result.token, user: result.user },
+        "Login berhasil."
       );
     } catch (error) {
-      logger.error("Login Error", error);
+      // Log error system ke file (biar admin tau)
+      logger.error("Login Initiate Error", error);
+
+      // Balas ke user dengan 401 (Unauthorized)
+      // Jangan kasih detail error 500 ke user, cukup pesan aman
       return response.error(res, error.message, 401);
     }
   },
 
-  // Handle Input Kode OTP
+  // Pintu 2: Cek Kode OTP
   verifyMfa: async (req, res) => {
     try {
       const { preAuthToken, mfaCode } = req.body;
@@ -49,11 +55,8 @@ const loginController = {
 
       return response.success(
         res,
-        {
-          token: result.token,
-          user: result.user,
-        },
-        "Verifikasi MFA sukses."
+        { token: result.token, user: result.user },
+        "Verifikasi MFA sukses. Selamat datang."
       );
     } catch (error) {
       logger.error("MFA Verify Error", error);

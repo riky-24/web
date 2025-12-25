@@ -1,5 +1,3 @@
-const response = require("../utils/responseHelper");
-
 const loginMiddleware = {
   // Validasi Input Tahap 1
   validateInitiate: (req, res, next) => {

@@ -1,5 +1,4 @@
 const rateLimit = require("express-rate-limit");
-const response = require("../utils/responseHelper");
 const logger = require("../utils/logger");
 // [BARU] Import Security Config
 const securityConfig = require("../config/security");

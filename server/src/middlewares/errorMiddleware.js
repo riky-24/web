@@ -1,4 +1,3 @@
-const response = require("../utils/responseHelper");
 const logger = require("../utils/logger");
 
 const errorMiddleware = {
