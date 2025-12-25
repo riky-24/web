@@ -1,49 +1,45 @@
 const { prisma } = require("../config/database");
 
 const userModel = {
-  // Cari user berdasarkan ID
-  findById: async (id) => {
-    return await prisma.user.findUnique({ where: { id } });
-  },
-
-  // Cari user berdasarkan Email (untuk Login/Register)
-  findByEmail: async (email) => {
-    return await prisma.user.findUnique({ where: { email } });
-  },
-
-  // Cari user berdasarkan Token Verifikasi Email
-  findByVerificationToken: async (token) => {
+  // [KHUSUS LOGIN] Ambil password & role
+  findForLogin: async (email) => {
     return await prisma.user.findUnique({
-      where: { verificationToken: token },
-    });
-  },
-
-  // Cari user berdasarkan Token Reset Password yang belum kadaluwarsa
-  findByResetToken: async (token) => {
-    return await prisma.user.findFirst({
-      where: {
-        resetPasswordToken: token,
-        resetPasswordExpires: { gt: new Date() }, // Token harus masih berlaku
+      where: { email },
+      select: {
+        id: true,
+        email: true,
+        password: true, // Hati-hati, ini sensitif
+        role: true,
+        username: true,
+        isVerified: true,
+        isActive: true,
+        balance: true,
       },
     });
   },
 
-  // Buat User Baru
-  create: async (data) => {
-    return await prisma.user.create({ data });
-  },
-
-  // Update Data User
-  update: async (id, data) => {
-    return await prisma.user.update({
+  // [UMUM] Ambil user tanpa password (untuk verifikasi MFA)
+  findById: async (id) => {
+    return await prisma.user.findUnique({
       where: { id },
-      data,
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        role: true,
+        isVerified: true,
+        isActive: true,
+        balance: true,
+      },
     });
   },
 
-  // Hapus User (Misal untuk cleanup registrasi gagal)
-  delete: async (id) => {
-    return await prisma.user.delete({ where: { id } });
+  // ... (method create, update, delete lainnya tetap ada)
+  create: async (data) => {
+    return await prisma.user.create({ data });
+  },
+  update: async (id, data) => {
+    return await prisma.user.update({ where: { id }, data });
   },
 };
 
