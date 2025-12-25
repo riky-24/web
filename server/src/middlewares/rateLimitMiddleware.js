@@ -2,6 +2,7 @@ const rateLimit = require("express-rate-limit");
 const logger = require("../utils/logger");
 // [BARU] Import Security Config
 const securityConfig = require("../config/security");
+const response = require("../utils/responseHelper");
 
 const limitHandler = (req, res, next, options) => {
   logger.warn(`Rate Limit Exceeded: ${req.ip}`, "SecurityAlert");

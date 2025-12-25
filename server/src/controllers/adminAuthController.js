@@ -2,22 +2,27 @@ const adminAuthService = require("../services/adminAuthService");
 const response = require("../utils/responseHelper");
 const logger = require("../utils/logger");
 
+/**
+ * Controller Autentikasi Admin
+ * Memastikan alur login 2 tahap (Password & MFA)
+ *
+ */
 const adminAuthController = {
-  // Handle Login Tahap 1
+  // TAHAP 1: Inisiasi Login (Cek Password)
+  //
   login: async (req, res) => {
     try {
       const { email, password } = req.body;
-      const result = await adminAuthService.initiateLogin(
-        email,
-        password,
-        req.ip
-      );
+      const result = await adminAuthService.initiate(email, password, req.ip);
 
       if (result.status === "MFA_REQUIRED") {
         return res.status(200).json({
           success: true,
-          message: "Kredensial benar. Masukkan kode MFA.",
-          data: { mfaRequired: true, preAuthToken: result.preAuthToken },
+          message: "Kredensial benar. Silakan masukkan kode OTP.",
+          data: {
+            mfaRequired: true,
+            preAuthToken: result.preAuthToken,
+          },
         });
       }
     } catch (error) {
@@ -26,11 +31,12 @@ const adminAuthController = {
     }
   },
 
-  // Handle Verifikasi OTP
-  verifyMfa: async (req, res) => {
+  // TAHAP 2: Verifikasi OTP
+  //
+  verifyOtp: async (req, res) => {
     try {
       const { preAuthToken, otpCode } = req.body;
-      const result = await adminAuthService.verifyAdminMfa(
+      const result = await adminAuthService.verifyMfa(
         preAuthToken,
         otpCode,
         req.ip

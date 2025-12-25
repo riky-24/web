@@ -2,8 +2,6 @@ const constants = {
   // ROLE KHUSUS PERSONIL (Tidak ada role USER publik)
   ROLES: {
     ADMIN: "ADMIN", // Super Admin
-    STAFF: "STAFF", // Petugas Operasional
-    RESELLER: "RESELLER", // Partner VIP
   },
 
   AUTH_STEPS: {
